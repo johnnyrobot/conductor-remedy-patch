@@ -248,6 +248,6 @@ that base (`-x` trailers name the originals). 0011 drops the fork's
 `docker-compose.yml` hunk, which belonged to one deployment, and the test that
 read it. 0012 was new to this set.
 
-0013–0014 come from `fix/a11y-apply-guards` (johnnylibretexts/conductor-dev
+0013–0014 come from `fix/a11y-apply-guards` (johnnylibretexts-ai/conductor-dev
 PR #8). 0013 drops that commit's removal of the two committed `node_modules`
 symlinks, because this patch set never carried them.
