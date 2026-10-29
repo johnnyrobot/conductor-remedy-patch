@@ -2,22 +2,26 @@
 
 LT-130 / LT-132 implement the target decision under LT-115 and LT-111. These
 workstreams do not establish production readiness. Actual production version,
-Atlas tier, cluster topology and orchestrator are unknown.
+Atlas tier, cluster topology and orchestrator are unknown. Current 24-patch Linux
+candidate results and exact image artifacts are in [LT-158](../releases/lt158-linux-candidate.md);
+the compatibility validation table below is historical LT-130 evidence.
 
 ## Selected targets and deterministic application
 
 | Role | Upstream commit | Version context | Delivered tree |
 |---|---|---|---|
-| Primary staging | `67301b35c3784ed73ba1a65011ef5a1d689abca1` | Root package says 2.156.2; Chief assessment reported image label 2.157.0-rc.4 | `6527b7d287d78cb505b4c04b301f29e6d65c14c7` |
-| Secondary released floor | `352a657ec6de7b317a70ad3f8f744bc6d5054d9d` | v2.156.2 | `52a78f7c74b1e79be5552c689abdc5fdbe1330c9` |
+| Primary staging | `67301b35c3784ed73ba1a65011ef5a1d689abca1` | Root package says 2.156.2; Chief assessment reported image label 2.157.0-rc.4 | `03589d94ffba9b3ee79a97dcb71100ed7e0f92c3` |
+| Secondary released floor | `352a657ec6de7b317a70ad3f8f744bc6d5054d9d` | v2.156.2 | `90ef990f17c53d45c3d25404b19f1a55ea1c20f8` |
 
 The image label is assessment context, not a pulled/booted image or observation of
 production. Do not use `latest`; approved deployment must pin compatible image
-versions and digests. This work preserves the upstream Dockerfile and supplies
-source/patch integrity manifests, not a finished image/deployment bundle.
+versions and digests. The original compatibility slice preserved the upstream Dockerfile. Patch 0024
+now pins its existing Node 22 stages to one immutable base, with the actual final
+compiled image tested in Linux CI. Candidate image artifacts and source integrity
+are supplied; the complete production deployment bundle remains gated.
 
 Use the explicit fresh detached-checkout command in the repository README. Each
-manifest binds the full base commit, twenty-three ordered patch files, SHA-256s and
+manifest binds the full base commit, twenty-four ordered patch files, SHA-256s and
 final Git tree. The application tool checks those inputs and repository state
 before `git am --3way`, then checks the resulting tree. It makes no network call,
 reset, abort, branch deletion or push. On unexpected Git failure it preserves the
@@ -97,8 +101,10 @@ without sending mail. Each real `/health` returned 200 with Mongo readyState 1,
 then the fixture was stopped. Mongo **8.0.5** was a disposable loopback standalone.
 The upstream log wording “MongoDB Atlas” is not evidence that Atlas was tested.
 
-Docker daemon was unavailable (missing socket); no desktop activation, image
-pull/build/boot, musl runtime or production TLS/cookie test is claimed. No live
+At the original LT-130 check, Docker was unavailable (missing socket); that slice
+claimed no image pull/build/boot or musl runtime test. LT-158 now supplies actual
+compiled Alpine/Node 22 image checks, production-mode native session/API tests
+and internal HTTPS fixture wiring; production browser/SSO/TLS remains separate. No live
 CAS, CXone, ADAPT, Remedy or AI provider was used. External guard/preflight evidence
 and focused authorized TestSprite run IDs/verdicts are recorded in LT-130 and the
 compatibility PR; those runs do not verify the unresolved release gates.
@@ -162,46 +168,52 @@ provisioning and rollout remain owner-only.
 [LT-131 validation](../releases/lt131-tenant-opt-in.md) records current checks and
 config controls; the compatibility table above remains historical evidence.
 
-## Mongo collections, indexes and backup implications
+## Current Mongo collections, indexes and backup implications
 
-| Collection/data | Required index or relationship |
+| Collection/data | Current relationship or explicit limit |
 |---|---|
-| `remediationworkitems` | Automatic `_id`; unique compound `{projectID:1,key:1}` for import deduplication |
-| `conformancerecords` | Automatic `_id`; lookup `{projectID:1,kind:1,createdAt:-1}` for append-only scope/review/sign-off records |
-| Private `projects.remedyOperations` | Atomic append-only intent/response history, excluded from ordinary project reads; grows within the Mongo document limit |
-| Existing `projects.a11yReview` | Stable section `_id`, source/rendered fingerprints, evidence revision and pending-write state |
+| `remediationworkitems` | Unique `{projectID:1,key:1}`. Each history/evidence array refuses at 1,000 events; physical item must be below 8 MiB before an append of at most 64 KiB. Retained oversized legacy data stays readable/exportable. |
+| `conformancerecords` | Immutable scope/review/sign-off records; `{projectID:1,kind:1,createdAt:-1,_id:-1}` and `{projectID:1,sectionID:1,criterionID:1,_id:-1}`. New records at most 64 KiB. |
+| `remedyoperationrecords` | Immutable write-ahead events; project/localID/kind/history lookup, unique intent issuer/jti and project/localID. New event at most 64 KiB. |
+| Private `projects.remedyOperations` | Preserved read-only legacy history; no new appends or startup migration. |
+| Private `projects.remedyResolutionCommits` | Append-only winning CAS references, maximum 1,000. Resolution also checks Project below 12 MiB and fresh scan at most 1 MiB. |
+| `projects.a11yReview` | Stable section target/version, current evidence, bounded pending pointer and resolution epoch; no automatic uncertain-claim release. |
 
-These models compile lazily and disable automatic collection/index creation.
-Configured health preflight and authorized work-queue requests explicitly create the two
-collections and declared indexes; failures report unavailable and do not crash
-unrelated startup. Successful readiness is cached in-process; external index
-changes require operator preflight/restart. Generic Mongo connection health alone
-does not establish feature-index readiness. Confirm collection/index creation privileges and index readiness before
-enabling the feature; identify duplicate project/key pairs before creating a
-unique index on retained data. No automatic deduplication/deletion is authorized.
-Disabled optional Remedy does not compile either feature model at route import.
-The first enabled feature request needs collection/index creation privileges;
-no automatic retained-data repair or index deletion is performed.
+Feature models compile lazily with autoCreate/autoIndex disabled. Enabled
+health/queue preflight explicitly creates the three feature collections and
+indexes; matrix write admission also ensures operation indexes. Failures report
+unavailable. Disabled Remedy does not compile these models at route import.
+Preflight currently requires collection/index creation privileges in addition
+to normal read/insert/update privileges; insert-only credentials are insufficient.
+Actual Atlas tier/roles/topology/storage and index windows remain owner decisions.
 
-Work-item history/evidence arrays and append-only conformance records grow; no
-retention or compaction policy is introduced here. Back up Projects, work items,
-conformance records and referenced user identities consistently. A restore must
-preserve section identity, current evidence versions and pending claims and must
-be reconciled with Bridge's operation/snapshot ledger and trust epoch. Never clear
-an uncertain claim or replay a write just because a backup was restored. Actual
-Atlas service tier, Mongo version/sharding, index-build windows, storage, backups
-and orchestrator are unknown and require the deployment owner's assessment.
+See applied `docs/remedy-storage-and-reads.md` and
+`docs/remedy-explicit-recovery.md` for exact bounded routes, complete authenticated
+exports, read-only legacy inventory, write-ahead/standalone behavior, quotas and
+upgrade/downgrade limits. No history deletion/compaction or live migration occurs.
+
+Drain admissions for backup-grade consistency. Preserve Projects (including
+private commit references), all three feature collections and user identities
+with Bridge's independent ledger/fence, snapshots and trust epoch. Never restore
+an old fence with a database, clear an uncertain pointer or replay a write merely
+because a backup was restored. Keep compatible readers for externalized intents
+and new commit proof during rollback. Candidate Linux standalone Mongo tests do
+not establish real Atlas permissions, production backup or operator acceptance.
 
 ## Remaining release gates
 
-Patch 0018 addresses LT-126 stale TOC overwrite and failed standalone-scan parent
-refresh; [current regression evidence](../releases/lt126-evidence-import.md) records
-both target checks separately from the compatibility evidence above. Patch0020
-implements the approved signed producer, matched no-op preservation and scoped
-read-only recovery; LT-127 retains separately audited administrative resolution.
-[actual integration evidence](../releases/lt140-reviewed-operations.md) records
-precisely which service commits/runtime/scenarios passed. Audited administrative
-resolution remains separate. LT-128 performance/read bounds, deadlines/cancellation, automated patch CI, full-stack Linux/auth/provider
-failure/restore coverage, immutable image bundle and reviewed upgrade/rollback
-handoff remain open under LT-115/LT-111. Compatibility validation retires the old
-recommended source base; it does not clear those production gates.
+LT-126, tenant opt-in LT-131, signed producer/read-only recovery LT-140, indexed
+projection LT-156, bounded reads/storage LT-157 and signer documentation LT-148
+are delivered. Patch 0023 implements the approved explicit support recovery of
+Bridge-resolved unknown operations, with actual three-service/offline-operator
+HTTP evidence in [LT-127](../releases/lt127-explicit-recovery.md). A read-only lookup
+never clears a claim. The broader LT-127 known-success/not-attempted/absent remote
+settlement contract remains open and those claims stay held.
+
+LT-158 automates both target series and actual compiled Linux candidate images.
+Its internal HTTPS protocol fixture is not full owned Server/Bridge/Scanner Linux
+integration. Full assembled topology, vendor-supported revision-atomic writes,
+real provider and browser/SSO/TLS behavior, real signing rollout, Mongo/backup/
+upgrade/rollback acceptance and the reviewed production bundle remain gates under
+LT-115/LT-111. No candidate image, source compatibility result or automated score
+constitutes production approval or human WCAG conformance.

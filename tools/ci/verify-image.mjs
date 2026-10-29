@@ -1,0 +1,338 @@
+import fs from "node:fs";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import {
+  createHash,
+  generateKeyPairSync,
+  randomBytes,
+  randomUUID,
+} from "node:crypto";
+import { fileURLToPath } from "node:url";
+const [image, patched, directory, resultFile] = process.argv.slice(2),
+  here = path.dirname(fileURLToPath(import.meta.url)),
+  pins = JSON.parse(fs.readFileSync(path.join(here, "runtime-pins.json")));
+if (
+  process.platform !== "linux" ||
+  !image?.startsWith("johnnyrobot/conductor-remedy-candidate:")
+)
+  throw Error("Linux candidate-image verification only.");
+fs.mkdirSync(directory);
+const appDir = path.join(directory, "app"),
+  engineDir = path.join(directory, "engine"),
+  logs = path.join(directory, "logs");
+for (const name of [appDir, engineDir, logs]) fs.mkdirSync(name);
+const prefix = "conductor-ci-" + randomBytes(5).toString("hex"),
+  network = prefix + "-net",
+  mongo = prefix + "-mongo",
+  engine = prefix + "-engine",
+  app = prefix + "-app",
+  owned = [];
+let logNumber = 0;
+const run = (label, args, { allowFailure = false, capture = false } = {}) => {
+  const file = path.join(logs, `${++logNumber}-${label}.log`),
+    fd = fs.openSync(file, "w"),
+    result = spawnSync("docker", args, { stdio: ["ignore", fd, fd] });
+  fs.closeSync(fd);
+  if ((result.error || result.status !== 0) && !allowFailure)
+    throw Error(label + " failed; inspect " + file);
+  return capture ? fs.readFileSync(file, "utf8").trim() : result.status;
+};
+const report = {
+  synthetic: true,
+  compiledShippingEntrypoint: false,
+  platform: "linux/amd64",
+  fullOwnedStackLinuxVerified: false,
+  productionReady: false,
+  phases: [],
+};
+const config = {
+  key: randomBytes(32).toString("hex"),
+  jwt: randomBytes(48).toString("hex"),
+  password: randomBytes(24).toString("base64url"),
+  editor: randomUUID(),
+  auditor: randomUUID(),
+  outsider: randomUUID(),
+  issuer: "urn:conductor:ci",
+  audience: "urn:remedy:ci",
+  kid: "ci-generated-" + randomBytes(6).toString("hex"),
+  projectID: "ci00000001",
+  sectionID: "158000000000000000000001",
+  pagePath: "Sandboxes/johnnyphung/CI_fixture",
+};
+config.pageURL = "https://dev.libretexts.org/" + config.pagePath;
+try {
+  const keys = generateKeyPairSync("ed25519");
+  fs.writeFileSync(
+    path.join(appDir, "signer.pem"),
+    keys.privateKey.export({ format: "pem", type: "pkcs8" }),
+    { mode: 0o600 },
+  );
+  fs.writeFileSync(
+    path.join(engineDir, "signer-public.pem"),
+    keys.publicKey.export({ format: "pem", type: "spki" }),
+  );
+  fs.copyFileSync(
+    path.join(patched, "server/util/conformanceCriteria.json"),
+    path.join(engineDir, "criteria.json"),
+  );
+  fs.copyFileSync(
+    path.join(here, "engine.mjs"),
+    path.join(engineDir, "engine.mjs"),
+  );
+  fs.copyFileSync(
+    path.join(here, "assert-runtime.mjs"),
+    path.join(appDir, "assert-runtime.mjs"),
+  );
+  const cert = spawnSync(
+    "openssl",
+    [
+      "req",
+      "-x509",
+      "-newkey",
+      "rsa:2048",
+      "-nodes",
+      "-keyout",
+      path.join(engineDir, "tls.key"),
+      "-out",
+      path.join(engineDir, "tls.pem"),
+      "-subj",
+      "/CN=engine",
+      "-addext",
+      "subjectAltName=DNS:engine",
+      "-days",
+      "1",
+    ],
+    { stdio: "ignore" },
+  );
+  if (cert.status !== 0)
+    throw Error("Synthetic TLS certificate generation failed.");
+  fs.chmodSync(path.join(engineDir, "tls.key"), 0o600);
+  fs.copyFileSync(path.join(engineDir, "tls.pem"), path.join(appDir, "ca.pem"));
+  const base = {
+    NODE_ENV: "production",
+    APP_ENV: "candidate_ci",
+    ORG_ID: "libretexts",
+    PORT: "5000",
+    TRUST_PROXY_HOPS: "0",
+    PRODUCTIONURLS: "conductor.invalid,https://conductor.invalid",
+    SECRETKEY: config.jwt,
+    OPENAI_API_KEY: "synthetic-not-real",
+    STRIPE_SECRET_KEY: "sk_test_synthetic_not_real",
+    MAILGUN_API_KEY: "synthetic-not-real",
+    MAILGUN_DOMAIN: "fixture.example.invalid",
+    NEW_RELIC_ENABLED: "false",
+    NODE_EXTRA_CA_CERTS: "/fixture/ca.pem",
+  };
+  function writeConfig(mode) {
+    const db =
+        mode === "off"
+          ? "conductor_test_runtime_off"
+          : "conductor_test_runtime_enabled",
+      mongoURI = "mongodb://mongo:27017/" + db,
+      now = Math.floor(Date.now() / 1000);
+    fs.writeFileSync(
+      path.join(appDir, "app.json"),
+      JSON.stringify({ ...config, mongoURI }),
+      { mode: 0o600 },
+    );
+    const env = {
+      ...base,
+      MONGOOSEURI: mongoURI,
+      ...(mode === "off"
+        ? {}
+        : {
+            REMEDY_ENABLED: "true",
+            REMEDY_ORG_ID: "libretexts",
+            REMEDY_API_BASE_URL: "https://engine:8443",
+            REMEDY_API_KEY: config.key,
+            REMEDY_REVIEWER_KEY_ENABLED: mode === "recover" ? "false" : "true",
+            REMEDY_REVIEWER_SIGNING_KEY_FILE: "/fixture/signer.pem",
+            REMEDY_REVIEWER_KEY_ID: config.kid,
+            REMEDY_REVIEWER_ISSUER: config.issuer,
+            REMEDY_REVIEWER_AUDIENCE: config.audience,
+            REMEDY_REVIEWER_KEY_NOT_BEFORE: String(now - 120),
+            REMEDY_REVIEWER_KEY_NOT_AFTER: String(now + 3600),
+          }),
+    };
+    fs.writeFileSync(
+      path.join(directory, "runtime.env"),
+      Object.entries(env)
+        .map(([k, v]) => k + "=" + v)
+        .join("\n") + "\n",
+      { mode: 0o600 },
+    );
+  }
+  async function ready(name) {
+    for (let i = 0; i < 90; i++) {
+      const state = run(
+        "health-poll",
+        ["inspect", "--format", "{{.State.Health.Status}}", name],
+        { allowFailure: true, capture: true },
+      );
+      if (state === "healthy") return;
+      const running = run(
+        "state-poll",
+        ["inspect", "--format", "{{.State.Running}}", name],
+        { allowFailure: true, capture: true },
+      );
+      if (running === "false")
+        throw Error("Compiled candidate exited before health.");
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    throw Error("Compiled candidate health deadline exceeded.");
+  }
+  async function appPhase(mode) {
+    writeConfig(mode);
+    owned.push(app);
+    run("start-" + mode, [
+      "run",
+      "--detach",
+      "--name",
+      app,
+      "--network",
+      network,
+      "--network-alias",
+      "conductor",
+      "--env-file",
+      path.join(directory, "runtime.env"),
+      "--volume",
+      appDir + ":/fixture:ro",
+      image,
+    ]);
+    await ready(app);
+    const processOne = run(
+      "entrypoint-" + mode,
+      [
+        "exec",
+        app,
+        "node",
+        "--input-type=module",
+        "-e",
+        "import fs from 'node:fs';process.stdout.write(fs.readFileSync('/proc/1/cmdline','utf8').replaceAll('\\0',' ').trim())",
+      ],
+      { capture: true },
+    );
+    if (processOne !== "node dist/server.js")
+      throw Error("A substitute runtime was started.");
+    report.compiledShippingEntrypoint = true;
+    const raw = run(
+      "assert-" + mode,
+      ["exec", app, "node", "/fixture/assert-runtime.mjs", mode],
+      { capture: true },
+    );
+    report.phases.push(JSON.parse(raw.split("\n").filter(Boolean).at(-1)));
+    run("logs-" + mode, ["logs", app], { allowFailure: true });
+    run("stop-" + mode, ["stop", "--time", "10", app]);
+    run("remove-" + mode, ["rm", "--volumes", app]);
+    owned.splice(owned.indexOf(app), 1);
+  }
+  run("network", ["network", "create", "--internal", network]);
+  report.internalNetwork =
+    run(
+      "network-policy",
+      ["network", "inspect", "--format", "{{.Internal}}", network],
+      { capture: true },
+    ) === "true";
+  if (!report.internalNetwork)
+    throw Error("Runtime fixture must deny external egress.");
+  run("pull-mongo", ["pull", "--platform", "linux/amd64", pins.mongo]);
+  owned.push(mongo);
+  run("start-mongo", [
+    "run",
+    "--detach",
+    "--name",
+    mongo,
+    "--network",
+    network,
+    "--network-alias",
+    "mongo",
+    pins.mongo,
+    "--bind_ip_all",
+  ]);
+  let mongoReady = false;
+  for (let i = 0; i < 60; i++) {
+    if (
+      run(
+        "mongo-ping",
+        [
+          "exec",
+          mongo,
+          "mongosh",
+          "--quiet",
+          "--eval",
+          "db.adminCommand({ping:1}).ok",
+        ],
+        { allowFailure: true },
+      ) === 0
+    ) {
+      mongoReady = true;
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  if (!mongoReady) throw Error("Isolated Mongo failed to start.");
+  report.mongoImage = pins.mongo;
+  await appPhase("off");
+  fs.writeFileSync(
+    path.join(engineDir, "engine.json"),
+    JSON.stringify({
+      key: config.key,
+      editor: config.editor,
+      issuer: config.issuer,
+      audience: config.audience,
+      kid: config.kid,
+      projectID: config.projectID,
+      pagePath: config.pagePath,
+      pageURL: config.pageURL,
+      mongoURI: "mongodb://mongo:27017/conductor_test_runtime_enabled",
+    }),
+    { mode: 0o600 },
+  );
+  owned.push(engine);
+  run("start-engine", [
+    "run",
+    "--detach",
+    "--name",
+    engine,
+    "--network",
+    network,
+    "--network-alias",
+    "engine",
+    "--volume",
+    engineDir + ":/fixture:ro",
+    "--entrypoint",
+    "node",
+    image,
+    "/fixture/engine.mjs",
+  ]);
+  await appPhase("enabled");
+  await appPhase("recover");
+  report.passed = true;
+} catch (error) {
+  report.passed = false;
+  report.error = error.message;
+  process.exitCode = 1;
+} finally {
+  for (const name of [...owned].reverse()) {
+    run("failure-logs-" + name, ["logs", name], { allowFailure: true });
+    run("cleanup-" + name, ["rm", "--force", "--volumes", name], {
+      allowFailure: true,
+    });
+  }
+  run("remove-network", ["network", "rm", network], { allowFailure: true });
+  fs.rmSync(appDir, { recursive: true, force: true });
+  fs.rmSync(engineDir, { recursive: true, force: true });
+  fs.rmSync(path.join(directory, "runtime.env"), { force: true });
+  // Only owned ephemeral credentials are removed; source/evidence logs are preserved.
+  fs.writeFileSync(resultFile, JSON.stringify(report, null, 2) + "\n");
+  fs.cpSync(logs, path.join(path.dirname(resultFile), "runtime-logs"), {
+    recursive: true,
+  });
+  process.stdout.write(
+    JSON.stringify({
+      passed: report.passed,
+      phases: report.phases.map((p) => p.phase),
+      error: report.error,
+    }) + "\n",
+  );
+}

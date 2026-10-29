@@ -1,0 +1,72 @@
+[
+  {
+    "target": "release-2.156.2",
+    "baseCommit": "352a657ec6de7b317a70ad3f8f744bc6d5054d9d",
+    "tree": "90ef990f17c53d45c3d25404b19f1a55ea1c20f8",
+    "validationManifestSHA256": "cbfb1236526629dc15db92b357123a55d7fd65a33da5bbc0cce38305f0c2fa14",
+    "deliveryCommit": "cde05316bb0e8cfaf8049c40c404e3de03c21cc1",
+    "imageID": "sha256:d26eb265a070c2de7cfe5c2924c47667d6e94294ff66a5c1be9bf3cf223acd78",
+    "tag": "johnnyrobot/conductor-remedy-candidate:release-2.156.2-90ef990f17c5",
+    "archive": "conductor-candidate-release-2.156.2.tar.gz",
+    "archiveSHA256": "bfd1ebc4b2e7a9b476d5521c5611057311fc850dfabf4a0fe760b1aba7343698",
+    "archiveBytes": 192558782,
+    "platform": "linux/amd64",
+    "runtimeNode": "v22.22.3",
+    "runtimeUser": "",
+    "standaloneTypecheckPass": false,
+    "inheritedDiagnostics": 60,
+    "allRequiredChecksPassed": true,
+    "compiledProductionPhases": [
+      "off",
+      "enabled",
+      "recover"
+    ],
+    "privateRuntimeEnvironmentAbsentFromImage": true,
+    "workflowRun": 40928445744,
+    "workflowURL": "https://github.com/johnnyrobot/conductor-remedy-patch/actions/runs/40928445744",
+    "artifactID": 12922860330,
+    "artifactURL": "https://github.com/johnnyrobot/conductor-remedy-patch/actions/runs/40928445744/artifacts/12922860330",
+    "artifactDigest": "sha256:a31bbfd6485283a65bcf7328509b031f54f5dbd7d9cbbc05abfbdf2ecdb648e1",
+    "artifactExpiresAt": "2026-11-12T18:21:05Z",
+    "testCounts": {
+      "server-tests": 32,
+      "authenticated-routes": 66,
+      "client-tests": 200
+    }
+  },
+  {
+    "target": "staging-67301b35",
+    "baseCommit": "67301b35c3784ed73ba1a65011ef5a1d689abca1",
+    "tree": "03589d94ffba9b3ee79a97dcb71100ed7e0f92c3",
+    "validationManifestSHA256": "3443e34338ef53f877f94eebde56da9ecbf0d37c4604d02a77204ed95b9f7a31",
+    "deliveryCommit": "cde05316bb0e8cfaf8049c40c404e3de03c21cc1",
+    "imageID": "sha256:aecd988b06ae097684cf1f71b8fdf1d59a86475da963f373cba5ec922a5d37bc",
+    "tag": "johnnyrobot/conductor-remedy-candidate:staging-67301b35-03589d94ffba",
+    "archive": "conductor-candidate-staging-67301b35.tar.gz",
+    "archiveSHA256": "8c0b54869437146deac4fabd47b2ceb4e154f5a68c6dad13794ec88d3b941b07",
+    "archiveBytes": 201507391,
+    "platform": "linux/amd64",
+    "runtimeNode": "v22.22.3",
+    "runtimeUser": "",
+    "standaloneTypecheckPass": false,
+    "inheritedDiagnostics": 60,
+    "allRequiredChecksPassed": true,
+    "compiledProductionPhases": [
+      "off",
+      "enabled",
+      "recover"
+    ],
+    "privateRuntimeEnvironmentAbsentFromImage": true,
+    "workflowRun": 40928445744,
+    "workflowURL": "https://github.com/johnnyrobot/conductor-remedy-patch/actions/runs/40928445744",
+    "artifactID": 12921309459,
+    "artifactURL": "https://github.com/johnnyrobot/conductor-remedy-patch/actions/runs/40928445744/artifacts/12921309459",
+    "artifactDigest": "sha256:4646de13e3dad8c4beb85c1fda3894e536499c7f9cb902f2a4934aad7c20fe09",
+    "artifactExpiresAt": "2026-11-12T18:20:49Z",
+    "testCounts": {
+      "server-tests": 62,
+      "authenticated-routes": 66,
+      "client-tests": 293
+    }
+  }
+]

@@ -1,0 +1,14 @@
+{
+  "node": {
+    "tag": "22-alpine3.22",
+    "indexDigest": "sha256:cd7807368cf24826297cbad5dca1a44972ccfd770647db52a8c7589eb4599ac8",
+    "linuxAMD64Digest": "sha256:8d6a8a2f25f8950664594b4c64678909718af0f567c99a85e44b11d0b44e059d",
+    "mediaType": "application/vnd.oci.image.index.v1+json"
+  },
+  "mongo": {
+    "tag": "7.0.14",
+    "indexDigest": "sha256:0032d2ca20db5fa34926f196c8a43b74e34ed239a7f2453ff1505b6f12ba8ea6",
+    "linuxAMD64Digest": "sha256:acd1a7d01d28cbf058e0fd04ef744fc5263c004d0f36a37330f465abf5007be0",
+    "mediaType": "application/vnd.oci.image.index.v1+json"
+  }
+}
