@@ -75,6 +75,7 @@ try {
     path.join(patched, "server/util/conformanceCriteria.json"),
     path.join(engineDir, "criteria.json"),
   );
+  fs.copyFileSync(path.join(here, "candidate-policy.mjs"), path.join(engineDir, "candidate-policy.mjs"));
   fs.copyFileSync(
     path.join(here, "engine.mjs"),
     path.join(engineDir, "engine.mjs"),

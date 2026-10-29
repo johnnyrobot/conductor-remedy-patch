@@ -3,6 +3,8 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
+import { verifyCandidateSource } from "./candidate-provenance.mjs";
+import { assertDockerBase } from "./ci/candidate-policy.mjs";
 import { compareTypecheck } from "./compare-typecheck.mjs";
 const [manifestArg, workspaceArg, mongo] = process.argv.slice(2),
   delivery = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -169,6 +171,10 @@ try {
   report.appliedTree = read("git", ["rev-parse", "HEAD^{tree}"], patched);
   if (report.appliedTree !== manifest.expectedTree)
     throw Error("Applied tree mismatch.");
+  report.sourceFiles = Object.fromEntries(["Dockerfile", ".dockerignore", "client/package.json", "client/package-lock.json", "server/package.json", "server/package-lock.json"].map(file =>
+    [file, createHash("sha256").update(fs.readFileSync(path.join(patched, file))).digest("hex")]));
+  const indexed = JSON.parse(fs.readFileSync(path.join(delivery, "docs/releases/current-candidates.json"))).candidates.find(candidate => candidate.target === manifest.target);
+  verifyCandidateSource(indexed, patched);
   for (const root of [control, patched])
     for (const component of ["server", "client"])
       run(
@@ -228,6 +234,8 @@ try {
   run("client-build", "npm", ["run", "build"], {
     cwd: path.join(patched, "client"),
   });
+  assertDockerBase(fs.readFileSync(path.join(patched, "Dockerfile"), "utf8"),
+    JSON.parse(fs.readFileSync(path.join(delivery, "tools/ci/runtime-pins.json"))).node);
   const image = `johnnyrobot/conductor-remedy-candidate:${manifest.target}-${manifest.expectedTree.slice(0, 12)}`;
   run("actual-dockerfile", "docker", [
     "build",

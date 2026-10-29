@@ -66,7 +66,7 @@ After application, read `docs/remediation-integration.md`,
 patched Conductor checkout for signer, backup, upgrade and rollback procedures.
 The Server-owned `deploy/stack/README.md` is the coordinated deployment entry
 point. This patch repository alone is not a completed production deployment
-package; [Linux candidates and remaining limits](docs/releases/lt158-linux-candidate.md)
+package; [current Linux candidates and remaining limits](docs/releases/lt178-current-candidates.md)
 identify what was actually validated.
 
 ---
@@ -125,7 +125,17 @@ release gates. **Production readiness is false** in both manifests. Patch0019 im
 engine configuration. Patch0020 supplies signed operations and read-only status lookup; production
 release still requires the remaining operational/deployment gates. Never deploy an image selected by `latest`.
 
-[LT-158 Linux candidate validation](docs/releases/lt158-linux-candidate.md) documents
+[Current 32-patch candidate index](docs/releases/current-candidates.json) is the
+packaging reference, with [download/verification instructions](docs/releases/lt178-current-candidates.md).
+It selects run40962740223 artifacts **12936278741** (staging, expires
+2026-11-12 at22:10:26UTC) and **12936304442** (release, expires
+2026-11-12 at22:13:20UTC), bound to the source trees above. Verify expiry and
+all three distinct ZIP/archive/image identities before packaging; expired or
+unavailable artifacts require a reviewed revalidation and index update.
+This is a metadata correction to already-tested images, not a claim that a
+documentation commit rebuilt them. All original 32-patch bytes remain unchanged.
+
+[Historical LT-158 Linux candidate validation](docs/releases/lt158-linux-candidate.md) documents
 the automated matrix and candidate artifact contract. Patch0024 pins the actual
 upstream Node22 Docker stages to one immutable base. Both final compiled Node22 production images passed Linux/amd64 CI with
 synthetic internal fixtures and archived candidates; full owned-stack Linux and

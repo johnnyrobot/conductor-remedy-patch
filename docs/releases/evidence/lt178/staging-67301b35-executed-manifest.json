@@ -1,0 +1,255 @@
+{
+  "formatVersion": 1,
+  "target": "staging-67301b35",
+  "role": "primary",
+  "upstreamRepository": "https://github.com/LibreTexts/conductor.git",
+  "baseCommit": "67301b35c3784ed73ba1a65011ef5a1d689abca1",
+  "expectedTree": "1edf0ba1516e39731f5c3289e31045bffda311f3",
+  "upstreamPackageVersion": "2.156.2",
+  "sourceCommit": "ace3f3a8364d107ccd280ce457e9bcdea3ae991c",
+  "patches": [
+    {
+      "path": "patches/0001-feat-a11y-carry-CXone-pageID-on-review-sections-extr.patch",
+      "sha256": "86033844a90226bc2766d325a5a457bc693d28225a6d6ace7ff746624220299e"
+    },
+    {
+      "path": "patches/0002-feat-a11y-add-Remedy-scan-preview-apply-endpoints-an.patch",
+      "sha256": "012c20ba54c9ab3e41a008cb7e32bdc4db071eb88ee71b8bda2c5025f2c68262"
+    },
+    {
+      "path": "patches/0003-feat-a11y-add-WCAG-matrix-scoring-and-Remedy-review-.patch",
+      "sha256": "ee19f2a8912220670d12018a161f8c41aa228cfdd6b0827496d59033c34c6cb7"
+    },
+    {
+      "path": "patches/0004-feat-connect-remediation-tasks-to-reviewed-fixes-and.patch",
+      "sha256": "9c589ff18cec9e297fc216451ce3bdf14f5517c0b8dd52c919e2ec6dcb2211d9"
+    },
+    {
+      "path": "patches/0005-docs-document-remediation-release-integration-and-va.patch",
+      "sha256": "c8ff4f83058560b22c176de72b6a0b0423318f79ad505cd48c7485472fd9b1af"
+    },
+    {
+      "path": "patches/0006-Refresh-remediation-matrix-and-support-reviewed-comp.patch",
+      "sha256": "c85f3f7e4c4128a96e3ee95d956e17aa8e5d4eb6aabd471e7f1660caa1428d44"
+    },
+    {
+      "path": "patches/0007-Document-book-remediation-acceptance-and-static-scan.patch",
+      "sha256": "741f9c9a41d33cada2735db86fdf7b0bae6880693c408e5045c46e53890262b4"
+    },
+    {
+      "path": "patches/0008-feat-require-reviewer-evidence-for-WCAG-conformance.patch",
+      "sha256": "e1334686f6998e6f487004fe7dcb5c54504bedbd830c064f34cd93d926912335"
+    },
+    {
+      "path": "patches/0009-fix-invalidate-failed-scans-and-serve-authenticated-.patch",
+      "sha256": "5a0fcd62d385600e0e297a1acb3fe27645dfeba7ef077fb1793807a0ca6a1d44"
+    },
+    {
+      "path": "patches/0010-feat-separate-remediation-handoff-acceptance-from-WC.patch",
+      "sha256": "b272f7550de0edb4b51db1432f45be83ecccd6eae45c28855e293cce1360bf5e"
+    },
+    {
+      "path": "patches/0011-fix-honor-configured-Conductor-browser-origins.patch",
+      "sha256": "3be90c7f7a2f2c0cada831439c820aba91eb7ba54e648838d50cd4ffed31ce8a"
+    },
+    {
+      "path": "patches/0012-test-a11y-run-RemediationPageActions-under-vitest.patch",
+      "sha256": "6d91faa6efc1aa313e71deff713797a409437c1f2e9fc89cc4e394ddf7540b13"
+    },
+    {
+      "path": "patches/0013-fix-a11y-require-a-reviewed-preview-before-apply-and.patch",
+      "sha256": "999a8b04addb92ca49a5f4edae376579625cd51264d97e01cab9e106fc26eceb"
+    },
+    {
+      "path": "patches/0014-feat-a11y-name-the-Conductor-reviewer-in-bridge-writ.patch",
+      "sha256": "939ea37efbfee6e609dfbc7d3056ab7da4eab7675fa65d69f141140a7bf0353f"
+    },
+    {
+      "path": "patches/0015-fix-a11y-bind-page-actions-and-reviews-to-current-ev.patch",
+      "sha256": "8f079f8a6644029b8d73a7e9587b208d5228be6c101ae45e544e94a1d582fabe"
+    },
+    {
+      "path": "patches/0016-fix-a11y-keep-pending-writes-and-reviewer-refresh-fa.patch",
+      "sha256": "7415a9e2f32379c4a078c5dcc268c4f5ef3378201709d186703b25a2397baf20"
+    },
+    {
+      "path": "patches/0017-fix-a11y-preserve-matrix-no-op-and-target-test-cover.patch",
+      "sha256": "9c83d179f0d9588b06c8a8d078c062cd5931be5e49c7392f03bc56e087e19eee"
+    },
+    {
+      "path": "patches/0018-fix-a11y-reject-stale-TOC-imports-and-refresh-failed.patch",
+      "sha256": "736af110463a1de58935a13d9d02448b23bc804a4b89db6b5107f7ad546872d1"
+    },
+    {
+      "path": "patches/0019-feat-a11y-require-explicit-tenant-opt-in-and-engine-.patch",
+      "sha256": "1281720c377b078cf2012fb5cb971f2b141ff4f34dedcdc48b10eb9ea8226ebb"
+    },
+    {
+      "path": "patches/0020-feat-a11y-bind-signed-operations-to-stored-reviewed-.patch",
+      "sha256": "2a4bbdce514abf16f381cf07d20ddf2ecf523cdaf62f469c29918d0902dc172a"
+    },
+    {
+      "path": "patches/0021-perf-a11y-index-current-conformance-review-selection.patch",
+      "sha256": "3795dceaddf2d275657c93ba4594cdf6bbf183430f7c5b0c223fc863e7ac7d72"
+    },
+    {
+      "path": "patches/0022-feat-a11y-bound-reads-and-externalize-immutable-oper.patch",
+      "sha256": "50d4f290efc479de1019ac749818385cdd79fab28921d800b0454c270a030218"
+    },
+    {
+      "path": "patches/0023-feat-a11y-resolve-only-audited-settled-page-claims-w.patch",
+      "sha256": "9744f166c3532d883f9f1bd92f57b67077d63c4d553554293dec168ace659437"
+    },
+    {
+      "path": "patches/0024-build-pin-the-existing-Node22-Linux-recipe-to-an-imm.patch",
+      "sha256": "d351f10c856937db6e50f8ab40a53f89bf1769859d92d28d75ee6c35115023af"
+    },
+    {
+      "path": "patches/0025-feat-a11y-support-explicit-authenticated-review-only.patch",
+      "sha256": "55006707255f4fb09f69515eb50e51cacef8f533d65b54680aa4d5ebe57382f4"
+    },
+    {
+      "path": "patches/0026-docs-a11y-document-optional-review-rollout-and-retai.patch",
+      "sha256": "838c85922fa59a98e70d37ae8b527c1c97353af9e5ae113f5e03e9b5434b6df4"
+    },
+    {
+      "path": "patches/0027-fix-a11y-permit-explicit-read-recovery-without-enabl.patch",
+      "sha256": "fe74f51f10d31278dcbef51964d21485fab738cbc385149e072f9ff586183b12"
+    },
+    {
+      "path": "patches/0028-fix-a11y-retry-review-reads-through-matrix-and-stand.patch",
+      "sha256": "bae9bd331668fe94dd62153143506d97d0daa040473423bf019d5af301d93421"
+    },
+    {
+      "path": "patches/0029-feat-a11y-recover-pending-writes-from-trusted-termin.patch",
+      "sha256": "92ea76c5229b4695cbe5e9dfbf9151b52abe48d83adeed71edcee0f40596ba6e"
+    },
+    {
+      "path": "patches/0030-fix-a11y-recheck-resolver-authority-at-terminal-proo.patch",
+      "sha256": "2067c50e87db2e0196022afdde54a3da1e5a64657e5e481a90582d577dcf10bf"
+    },
+    {
+      "path": "patches/0031-fix-a11y-match-the-producer-opaque-trust-epoch-exact.patch",
+      "sha256": "434053f0973515976290ec1f64e05e6bd1839e1543fd53788ff2ec5eeda5b941"
+    },
+    {
+      "path": "patches/0032-docs-a11y-point-current-recovery-guidance-to-termina.patch",
+      "sha256": "4574f7103946aacf19029547caf307861deb423e7c28b86bbb1906b1c5b16f78"
+    }
+  ],
+  "upstreamScripts": {
+    "server": {
+      "dev": "tsx watch --clear-screen=false server.ts | pino-pretty",
+      "build": "tsup server.ts --format esm --dts --out-dir dist && tsc-alias",
+      "typecheck": "tsc --noEmit",
+      "test": "node --import tsx --test \"util/**/*.test.ts\"",
+      "start:prod": "node --experimental-specifier-resolution=node dist/server.js",
+      "export:support": "tsx scripts/exportSanitizedSupportTickets.ts"
+    },
+    "client": {
+      "start": "vite --port 3000",
+      "build": "tsc && vite build",
+      "serve": "vite preview",
+      "test": "vitest run",
+      "test:watch": "vitest",
+      "test:visual": "SKIP_LOCAL_VISUAL_SCREENSHOTS=1 percy exec -- playwright test --project=journey",
+      "test:visual:local": "SKIP_PERCY_SNAPSHOTS=1 playwright test --project=journey",
+      "test:visual:headed": "SKIP_PERCY_SNAPSHOTS=1 playwright test --project=journey --headed",
+      "test:visual:mock": "VISUAL_USE_REAL_BACKEND=0 VITE_DEV_BASE_URL=http://localhost:5000 npm run test:visual:local --",
+      "test:visual:mock:headed": "VISUAL_USE_REAL_BACKEND=0 VITE_DEV_BASE_URL=http://localhost:5000 npm run test:visual:headed --",
+      "test:visual:real": "VISUAL_USE_REAL_BACKEND=1 npm run test:visual:local --",
+      "test:visual:real:headed": "VISUAL_USE_REAL_BACKEND=1 npm run test:visual:headed --",
+      "test:visual:isolated": "SKIP_PERCY_SNAPSHOTS=1 playwright test --project=isolated",
+      "test:visual:isolated:headed": "SKIP_PERCY_SNAPSHOTS=1 playwright test --project=isolated --headed"
+    }
+  },
+  "baselineLockfiles": {
+    "server/package-lock.json": "1a9e162ec960797f164646270cf3ef33375c925494484ece211b498393c7efc7",
+    "client/package-lock.json": "b10781d968a1c04a64a4c02f71614a4375943dd51d60bcba7525a6955159ae1e"
+  },
+  "validatedEnvironment": {
+    "node": "22.20.0",
+    "npm": "10.9.3",
+    "os": "macOS arm64",
+    "mongo": "7.0.14 isolated loopback standalone"
+  },
+  "productionVersionObserved": false,
+  "dockerImageBootVerified": true,
+  "tenantOptInEnforcementImplemented": true,
+  "deploymentReady": false,
+  "signedReviewerOperationsImplemented": true,
+  "readOnlyOperationLookupImplemented": true,
+  "storage": {
+    "operationHistory": "remedyoperationrecords immutable write-ahead events",
+    "activePointers": "projects.a11yReview.remedyPendingOperation",
+    "legacyHistory": "projects.remedyOperations retained read-only; no startup backfill",
+    "collections": [
+      "projects",
+      "remediationworkitems",
+      "conformancerecords",
+      "remedyoperationrecords"
+    ],
+    "writeAcknowledgement": "majority with journaling; standalone tested, no transaction prerequisite",
+    "readLimitDefault": 100,
+    "readLimitMaximum": 200,
+    "exportDeadlineSeconds": 120,
+    "workItemEventLimitPerArray": 1000,
+    "workItemAppendThresholdBytes": 8388608,
+    "newEventMaximumBytes": 65536,
+    "resolutionCommitMarkers": "projects.remedyResolutionCommits private append-only, maximum1000; Project before-CAS maximum12MiB; new scan maximum1MiB"
+  },
+  "explicitAdministrativeResolutionImplemented": true,
+  "allPendingRecoveryContractsComplete": false,
+  "candidateContainerBase": {
+    "node": "node:22-alpine3.22@sha256:cd7807368cf24826297cbad5dca1a44972ccfd770647db52a8c7589eb4599ac8",
+    "mongoTestFixture": "mongo:7.0.14@sha256:0032d2ca20db5fa34926f196c8a43b74e34ed239a7f2453ff1505b6f12ba8ea6",
+    "platform": "linux/amd64",
+    "recipe": "upstream Dockerfile with immutable base only",
+    "entrypoint": [
+      "node",
+      "dist/server.js"
+    ],
+    "status": "verified in Linux CI with synthetic internal fixtures"
+  },
+  "linuxCandidateValidation": {
+    "workflowRun": 40928445744,
+    "workflowURL": "https://github.com/johnnyrobot/conductor-remedy-patch/actions/runs/40928445744",
+    "artifactID": 12921309459,
+    "artifactURL": "https://github.com/johnnyrobot/conductor-remedy-patch/actions/runs/40928445744/artifacts/12921309459",
+    "artifactDigest": "sha256:4646de13e3dad8c4beb85c1fda3894e536499c7f9cb902f2a4934aad7c20fe09",
+    "artifactExpiresAt": "2026-11-12T18:20:49Z",
+    "validationManifestSHA256": "3443e34338ef53f877f94eebde56da9ecbf0d37c4604d02a77204ed95b9f7a31",
+    "imageID": "sha256:aecd988b06ae097684cf1f71b8fdf1d59a86475da963f373cba5ec922a5d37bc",
+    "archive": "conductor-candidate-staging-67301b35.tar.gz",
+    "archiveSHA256": "8c0b54869437146deac4fabd47b2ceb4e154f5a68c6dad13794ec88d3b941b07",
+    "platform": "linux/amd64",
+    "runtimeNode": "v22.22.3",
+    "runtimeUser": "",
+    "testCounts": {
+      "server-tests": 62,
+      "authenticated-routes": 66,
+      "client-tests": 293
+    },
+    "sourceTree": "03589d94ffba9b3ee79a97dcb71100ed7e0f92c3",
+    "fullOwnedStackLinuxVerified": false,
+    "productionApproval": false
+  },
+  "capabilityContract": {
+    "name": "cxone-review-v1",
+    "bridgeCommit": "28f37e2b57d3cf05308c19f5e363ff6f782cd837",
+    "serverCommitTested": "3fa8ed592bbe41f1f1a9adab4888dfaa1a9e2d71",
+    "optionalReviewOnly": true,
+    "productionWriteEnablementVerified": false
+  },
+  "terminalProofRecoveryImplemented": true,
+  "terminalProofContract": {
+    "contract": "cxone-terminal-v1",
+    "bridgeCommit": "03d961d7fbfbcc36bad885f5ec06d5f289cba09e",
+    "fixtureVersion": "cxone-terminal-v1-fixtures-r1",
+    "bindingFixtureSHA256": "be1b286ded8462208d282a6f4e711dee95d0be5235d12ed901b88a1a600499ab",
+    "expectedEpochVariable": "REMEDY_REVIEWER_TRUST_EPOCH",
+    "configurationDefault": null,
+    "automaticUnlock": false,
+    "remoteRetry": false
+  }
+}
