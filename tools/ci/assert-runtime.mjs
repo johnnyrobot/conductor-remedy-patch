@@ -130,7 +130,7 @@ const input = {
   projectID: config.projectID,
   sectionID: config.sectionID,
   fixMode: "deterministic",
-  findingIDs: [],
+  findingIDs: ["heading-1"],
 };
 assert.equal(
   (
@@ -259,7 +259,12 @@ if (phase === "off") {
   assert.equal(status.status, 200);
   assert.equal(status.data.pending, false);
   assert.equal(status.data.readOnly, true);
-  await control({ mode: "unknown" });
+  await control({ mode: "unknown", resetHeading: true });
+  const changedScan = await request(matrix + "/scan", "POST", input);
+  assert.equal(changedScan.status, 200);
+  assert.ok(
+    changedScan.data.findings.some((finding) => finding.id === "heading-1"),
+  );
   const unknown = await request(matrix + "/apply", "POST", await review());
   assert.equal(unknown.status, 502);
   assert.equal((await control()).writes, 2);

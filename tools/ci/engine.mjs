@@ -51,6 +51,7 @@ const server = https.createServer(
       const body = raw ? JSON.parse(raw) : {};
       if (req.url === "/control") {
         if (body.mode) mode = body.mode;
+        if (body.resetHeading) html = "<p><strong>Chapter</strong></p>";
         if (body.resolve) {
           const value = operations.get(body.resolve);
           assert.ok(value);
