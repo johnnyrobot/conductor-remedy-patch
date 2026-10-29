@@ -25,7 +25,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [staging-67301b35, release-2.156.2]
+        include:
+          - target: staging-67301b35
+            database: conductor_test_ci_staging
+          - target: release-2.156.2
+            database: conductor_test_ci_release
     services:
       mongo:
         image: mongo:7.0.14@sha256:0032d2ca20db5fa34926f196c8a43b74e34ed239a7f2453ff1505b6f12ba8ea6
@@ -44,10 +48,11 @@ jobs:
       - name: Reconstruct, test, baseline-relative typecheck, build and boot shipping image
         env:
           TARGET: ${{ matrix.target }}
+          TEST_DATABASE: ${{ matrix.database }}
         run: >-
           node tools/validate-target.mjs "series/$TARGET/manifest.json"
           "$RUNNER_TEMP/conductor-$TARGET-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          "mongodb://127.0.0.1:27158/conductor_test_ci_${TARGET}"
+          "mongodb://127.0.0.1:27158/$TEST_DATABASE"
       - name: Preserve candidate image, exact manifests, reports and failure logs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
