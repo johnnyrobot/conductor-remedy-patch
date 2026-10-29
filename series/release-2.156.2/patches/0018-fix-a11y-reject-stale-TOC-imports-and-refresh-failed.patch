@@ -1,0 +1,222 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: johnnyrobot <174211481+johnnyrobot@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 04:10:32 -0700
+Subject: [PATCH] fix(a11y): reject stale TOC imports and refresh failed scans
+
+LT-126: Compare current section and book snapshots atomically before import; preserve uncertain-write claims and refresh reviewer evidence after standalone scan failure.
+---
+ .../projects/ConformanceReview.test.tsx       | 16 +++-
+ .../projects/RemediationPageActions.tsx       |  2 +-
+ server/api/projects.js                        | 17 ++++-
+ server/integration/remedy-routes.test.ts      | 73 ++++++++++++++++++-
+ 4 files changed, 102 insertions(+), 6 deletions(-)
+
+diff --git a/client/src/components/projects/ConformanceReview.test.tsx b/client/src/components/projects/ConformanceReview.test.tsx
+index 49f7d16f..ef9bcfc5 100644
+--- a/client/src/components/projects/ConformanceReview.test.tsx
++++ b/client/src/components/projects/ConformanceReview.test.tsx
+@@ -6,7 +6,7 @@ import RemediationPageActions from './RemediationPageActions';
+ 
+ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+ 
+-function setup(includePageActions = false) {
++function setup(includePageActions = false, failScan = false) {
+   let fingerprint: string | null = 'evidence-A';
+   let scopeVersion = 'scope-1';
+   const submissions: any[] = [];
+@@ -24,6 +24,7 @@ function setup(includePageActions = false) {
+       {includePageActions && <RemediationPageActions base="/synthetic" section={{ id: 'page1', title: 'Synthetic article' }}
+         item={{ _id: 'item1', ruleId: 'img-alt', selector: 'img' }}
+         request={async (url: string) => {
++          if (url.endsWith('/scan') && failScan) { fingerprint = null; throw Error('Synthetic standalone scan failed'); }
+           if (url.endsWith('/scan')) return { findings: [{ id: 'finding1', ruleId: 'img-alt', selector: 'img', fixable: true }], page_url: 'https://fixture.invalid/' };
+           if (url.endsWith('/preview')) return { before_html: '<p>old</p>', after_html: '<p>new</p>' };
+           fingerprint = null;
+@@ -102,3 +103,16 @@ test('a completed queue write with failed rescan invalidates the mounted reviewe
+   expect(screen.getByLabelText('Compare every image with its description')).not.toBeChecked();
+   expect(screen.getByRole('button', { name: 'Save reviewer evidence' })).toBeDisabled();
+ });
++
++test('a failed standalone queue scan invalidates the mounted reviewer form without retry', async () => {
++  setup(true, true);
++  await fillReview();
++  expect(screen.getByRole('button', { name: 'Save reviewer evidence' })).toBeEnabled();
++  const requestsBefore = vi.mocked(fetch).mock.calls.length;
++  fireEvent.click(screen.getByRole('button', { name: 'Rescan page' }));
++  await screen.findByText('Synthetic standalone scan failed');
++  await waitFor(() => expect(screen.getByLabelText(/I performed this review/)).not.toBeChecked());
++  expect(screen.getByLabelText('Compare every image with its description')).not.toBeChecked();
++  expect(screen.getByRole('button', { name: 'Save reviewer evidence' })).toBeDisabled();
++  expect(fetch).toHaveBeenCalledTimes(requestsBefore + 1);
++});
+diff --git a/client/src/components/projects/RemediationPageActions.tsx b/client/src/components/projects/RemediationPageActions.tsx
+index 40fe1b63..91eab4d1 100644
+--- a/client/src/components/projects/RemediationPageActions.tsx
++++ b/client/src/components/projects/RemediationPageActions.tsx
+@@ -61,7 +61,7 @@ export default function RemediationPageActions({ base, section, item, request, r
+         setMessage(`${outcome} ${result.scanError || result.evidenceError || (item ? 'Rescan complete; evidence attached. Final verification remains with the reviewer.' : 'Rescan complete. Matrix updated. Final verification remains with the reviewer.')}`);
+       }
+       await refreshed();
+-    } catch (e: any) { setError(e.message); if (action === 'apply' || action === 'restore') { invalidate(); onScanSaved?.(); } }
++    } catch (e: any) { setError(e.message); if (action === 'scan' || action === 'apply' || action === 'restore') { invalidate(); onScanSaved?.(); } }
+     finally { setBusy(false); }
+   }
+   const images: any[] = [];
+diff --git a/server/api/projects.js b/server/api/projects.js
+index 5d40ce36..a0179575 100644
+--- a/server/api/projects.js
++++ b/server/api/projects.js
+@@ -2896,6 +2896,11 @@ const importA11YSectionsFromTOC = async (req, res) => {
+         // check user has permission to import TOC
+         if (!checkProjectMemberPermission(projectData, req.user)) throw new Error('unauth');
+ 
++        // Replacing or merging a pending page could discard its durable claim.
++        if (projectData.a11yReview?.some(section => section.remedyWritePending)) {
++            return res.status(409).json({ err: true, errMsg: 'A page write is pending or unknown. Reconcile it before importing sections.' });
++        }
++
+         // The project must be fully associated with a specific Book before we can fetch its TOC.
+         const bookID = getBookLinkedToProject(projectData);
+         if (!bookID) throw new Error('bookid');
+@@ -2915,13 +2920,21 @@ const importA11YSectionsFromTOC = async (req, res) => {
+             }
+ 
+             const updateRes = await Project.updateOne({
+-                projectID: { $eq: projectData.projectID }
++                projectID: { $eq: projectData.projectID },
++                // Compare the entire snapshot, including identity, evidence, pending claims
++                // and human review metadata. Never replay a merge after external work.
++                a11yReview: { $eq: projectData.a11yReview || [] },
++                projectURL: projectData.projectURL,
++                libreLibrary: projectData.libreLibrary,
++                libreCoverID: projectData.libreCoverID,
+             }, {
+                 $set: {
+                     a11yReview: pageObjs
+                 }
+             });
+-            if (updateRes.modifiedCount !== 1) throw new Error('updatefail'); // handle as generic error below
++            if (updateRes.matchedCount !== 1) {
++                return res.status(409).json({ err: true, errMsg: 'Project sections or evidence changed during import. Refresh and review the current state before importing again.' });
++            }
+             resMsg = req.body.merge === true
+                 ? 'LibreText sections successfully imported and merged.'
+                 : 'LibreText sections successfully imported.';
+diff --git a/server/integration/remedy-routes.test.ts b/server/integration/remedy-routes.test.ts
+index 97cf42f4..ec41950a 100644
+--- a/server/integration/remedy-routes.test.ts
++++ b/server/integration/remedy-routes.test.ts
+@@ -7,6 +7,7 @@ import express from 'express';
+ import cookieParser from 'cookie-parser';
+ import mongoose from 'mongoose';
+ import bcrypt from 'bcryptjs';
++import axios from 'axios';
+ import User from '../models/user.js';
+ import Project from '../models/project.js';
+ import { criteria } from '../util/conformance.js';
+@@ -29,6 +30,9 @@ let outcome = 'written', scanFails = false, changed = false;
+ let observedVerified: number | undefined;
+ let holdScan: (() => Promise<void>) | undefined;
+ let holdWrite: (() => Promise<void>) | undefined;
++let holdTOC: (() => Promise<void>) | undefined;
++let tocCalls = 0;
++const originalAdapter = axios.defaults.adapter;
+ function scan() { const at = new Date().toISOString(), sourceHash = changed ? 'new-source' : 'old-source'; return { wcag_review: { sourceHash, scannedAt: at, criteria: criteria.map(c => ({ ...c, status: 'manual_review' })), rendered: { state: 'complete', sourceHash, renderedHash: changed ? 'new-render' : 'old-render', platformHash: 'platform', browser: 'synthetic', axeVersion: '4', scannedAt: at, violations: [] } }, findings: [], scanned_at: at }; }
+ async function listen(server: http.Server) { await new Promise<void>(r => server.listen(0, '127.0.0.1', r)); return `http://127.0.0.1:${(server.address() as any).port}`; }
+ async function request(path: string, method = 'GET', body?: any, user = 'editor') {
+@@ -40,6 +44,16 @@ const matrix = '/project/accessibility/remedy';
+ const input = () => ({ projectID, sectionID, findingIDs: ['synthetic-finding'], previewHash: 'synthetic-hash', previewToken: 'synthetic-token' });
+ before(async () => {
+   await mongoose.connect(mongoURI);
++  // Fake only the external TOC HTTP provider; route, auth, merge and Mongo stay real.
++  axios.defaults.adapter = async config => {
++    assert.match(config.url || '', /^https:\/\/api\.libretexts\.org\/endpoint\/getTOC\//);
++    tocCalls++;
++    if (holdTOC) { const hold = holdTOC; holdTOC = undefined; await hold(); }
++    return { config, status: 200, statusText: 'OK', headers: {}, data: { toc: { structured: {
++      '@id': 'book', title: 'Synthetic book', url: page,
++      subpages: [{ '@id': '123', title: 'Imported title', url: page }],
++    } } } };
++  };
+   bridge = http.createServer(async (req, res) => {
+     let raw = ''; for await (const part of req) raw += part;
+     const body = raw ? JSON.parse(raw) : {};
+@@ -62,14 +76,15 @@ beforeEach(async () => {
+   await Project.deleteMany({ projectID });
+   await mongoose.connection.db!.collection('conformancerecords').deleteMany({ projectID });
+   await mongoose.connection.db!.collection('remediationworkitems').deleteMany({ projectID });
+-  changed = false; scanFails = false; outcome = 'written'; calls = [];
+-  await Project.create({ projectID, orgID: 'libretexts', title: 'Synthetic', members: [users.editor], leads: [], liaisons: [], auditors: [users.auditor], tags: [], a11yReview: [{ _id: new mongoose.Types.ObjectId(sectionID), sectionTitle: 'Stored title', sectionURL: page, pageID: '123', wcagReview: scan().wcag_review }] });
++  changed = false; scanFails = false; outcome = 'written'; calls = []; tocCalls = 0;
++  await Project.create({ projectID, orgID: 'libretexts', title: 'Synthetic', projectURL: page, libreLibrary: 'dev', libreCoverID: '123', members: [users.editor], leads: [], liaisons: [], auditors: [users.auditor], tags: [], a11yReview: [{ _id: new mongoose.Types.ObjectId(sectionID), sectionTitle: 'Stored title', sectionURL: page, pageID: '123', wcagReview: scan().wcag_review }] });
+   assert.equal((await request(base + '/conformance/scope', 'POST', { boundaries: 'Full synthetic test page', processes: 'Read all synthetic page content', platformVersion: 'Synthetic local test release', confirmed: true })).status, 200);
+   const report = (await request(base + '/conformance')).data.report;
+   assert.equal((await request(base + '/conformance/review', 'POST', { sectionID, criterionID: '1.1.1', fingerprint: report.pages[0].fingerprint, scopeVersion: report.scope.version, status: 'pass', notes: 'Verified the previous synthetic content.', environment: 'Synthetic local browser', evidenceURLs: [], checks: [0,1], confirmed: true })).status, 200);
+   assert.equal((await request(base + '/conformance')).data.report.verifiedCriteria, 1);
+ });
+ after(async () => {
++  axios.defaults.adapter = originalAdapter;
+   if (appServer) await new Promise<void>(r => appServer.close(() => r()));
+   if (bridge) await new Promise<void>(r => bridge.close(() => r()));
+   if (mongoose.connection.readyState) { await mongoose.connection.dropDatabase(); await mongoose.disconnect(); }
+@@ -191,3 +206,57 @@ test('matrix apply forwards only session-derived reviewer attribution and the st
+   assert.equal(sent.page_id, undefined);
+   assert.equal(sent.preview_token, 'synthetic-token');
+ });
++
++for (const merge of [true, false]) test(`TOC ${merge ? 'merge' : 'replace'} cannot overwrite a pending or uncertain write`, async () => {
++  let release!: () => void, started!: () => void;
++  const paused = new Promise<void>(r => { release = r; });
++  const entered = new Promise<void>(r => { started = r; });
++  holdTOC = async () => { started(); await paused; };
++  const importing = request('/project/accessibility/importsections', 'PUT', { projectID, merge });
++  await entered;
++  try {
++    outcome = 'uncertain';
++    const write = await request(`${matrix}/apply`, 'POST', input());
++    assert.equal(write.status, 502);
++    const before = (await request(base + '/conformance')).data.report;
++    const storedBefore = (await request(`/project/accessibility/sections?projectID=${projectID}`)).data.a11yReview;
++    release();
++    const imported = await importing;
++    assert.equal(imported.status, 409);
++    assert.match(imported.data.errMsg, /changed|pending|refresh/i);
++    const after = (await request(base + '/conformance')).data.report;
++    assert.equal(after.verifiedCriteria, 0);
++    const storedAfter = (await request(`/project/accessibility/sections?projectID=${projectID}`)).data.a11yReview;
++    assert.deepEqual(storedAfter, storedBefore, 'pending claim, evidence version and full section metadata must survive');
++    assert.equal(storedAfter[0].remedyWritePending, true);
++    assert.ok(storedAfter[0].remedyEvidenceVersion > 0);
++    assert.equal(after.pages[0].fingerprint, null);
++    assert.deepEqual(after.pages, before.pages, 'TOC must preserve the current evidence and stable identity');
++    assert.equal((await request(`${matrix}/apply`, 'POST', input())).status, 409);
++    assert.equal((await request(`${matrix}/scan`, 'POST', input())).status, 409);
++    assert.equal(calls.filter(c => c.path.endsWith('/apply-fix')).length, 1);
++    assert.equal(tocCalls, 1, 'conflict must not repeat external work');
++  } finally { release(); await importing; }
++});
++
++test('an unchanged TOC merge preserves section identity, reviewer evidence and metadata', async () => {
++  const before = (await request(base + '/conformance')).data.report;
++  const imported = await request('/project/accessibility/importsections', 'PUT', { projectID, merge: true });
++  assert.equal(imported.status, 200);
++  assert.equal(imported.data.err, false);
++  const after = (await request(base + '/conformance')).data.report;
++  assert.equal(after.verifiedCriteria, 1);
++  assert.equal(after.pages[0].sectionID, before.pages[0].sectionID);
++  assert.equal(after.pages[0].fingerprint, before.pages[0].fingerprint);
++  assert.equal(after.pages[0].title, 'Imported title');
++});
++
++test('TOC import refuses an existing uncertain claim before external work', async () => {
++  outcome = 'uncertain';
++  assert.equal((await request(`${matrix}/apply`, 'POST', input())).status, 502);
++  for (const merge of [true, false]) {
++    assert.equal((await request('/project/accessibility/importsections', 'PUT', { projectID, merge })).status, 409);
++  }
++  assert.equal(tocCalls, 0);
++  assert.equal((await request(base + '/conformance')).data.report.verifiedCriteria, 0);
++});
+-- 
+2.54.0 (Apple Git-157)
+

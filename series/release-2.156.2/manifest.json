@@ -4,9 +4,9 @@
   "role": "secondary-released-floor",
   "upstreamRepository": "https://github.com/LibreTexts/conductor.git",
   "baseCommit": "352a657ec6de7b317a70ad3f8f744bc6d5054d9d",
-  "expectedTree": "61636f304ca81b983a481eb266ccf0550452e05f",
+  "expectedTree": "0cacd7bccd03571483f237de76eea932bef02101",
   "upstreamPackageVersion": "2.156.2",
-  "sourceCommit": "76158bc4049c65af29592ece958f136b3a7b78a1",
+  "sourceCommit": "35439e4d45144a405d312ea74c1fd7794abf8fe3",
   "patches": [
     {
       "path": "patches/0001-feat-a11y-carry-CXone-pageID-on-review-sections-extr.patch",
@@ -75,6 +75,10 @@
     {
       "path": "patches/0017-fix-a11y-preserve-matrix-no-op-and-target-test-cover.patch",
       "sha256": "baae1a7a62d5c932caca9340f7680cb7ef71154f58bbe0e12b54921eaa5d0462"
+    },
+    {
+      "path": "patches/0018-fix-a11y-reject-stale-TOC-imports-and-refresh-failed.patch",
+      "sha256": "bbfb0b695b2775ccc17710ab644cb885635365a4d759fa254c5bb60fe2435d75"
     }
   ],
   "upstreamScripts": {
