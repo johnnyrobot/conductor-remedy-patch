@@ -66,3 +66,13 @@ test('a different pinned base is rejected without applying anything', () => {
   assert.equal(execFileSync('git', ['-C', f.checkout, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), f.base);
   assert.equal(fs.readFileSync(path.join(f.checkout, 'example.txt'), 'utf8'), 'before\n');
 });
+
+test('preflight refuses untracked work even when Git is configured to hide it', () => {
+  const f = fixture();
+  execFileSync('git', ['-C', f.checkout, 'config', 'status.showUntrackedFiles', 'no']);
+  fs.writeFileSync(path.join(f.checkout, 'retain-notes.txt'), 'retain my untracked notes\n');
+  const result = run(f, '--check');
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /not clean/);
+  assert.equal(fs.readFileSync(path.join(f.checkout, 'retain-notes.txt'), 'utf8'), 'retain my untracked notes\n');
+});

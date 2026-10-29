@@ -38,7 +38,7 @@ function main() {
   if (fs.realpathSync(git('rev-parse', '--show-toplevel')) !== checkout) fail('Checkout must name the repository root.');
   if (git('rev-parse', 'HEAD') !== manifest.baseCommit) fail('Checkout HEAD does not match the pinned base. Use a fresh clone at the manifest commit.');
   if (spawnSync('git', ['-C', checkout, 'symbolic-ref', '--quiet', 'HEAD'], { stdio: 'ignore' }).status === 0) fail('Use a fresh detached checkout so an existing branch cannot be changed.');
-  if (git('status', '--porcelain=v1')) fail('Checkout is not clean. Preserve its files and use a fresh clone.');
+  if (git('status', '--porcelain=v1', '--untracked-files=all')) fail('Checkout is not clean. Preserve its files and use a fresh clone.');
   for (const state of ['rebase-apply','rebase-merge','MERGE_HEAD','CHERRY_PICK_HEAD']) {
     if (fs.existsSync(path.resolve(checkout, git('rev-parse', '--git-path', state)))) fail('Checkout has an unfinished Git operation.');
   }
