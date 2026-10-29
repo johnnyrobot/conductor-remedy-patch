@@ -125,7 +125,7 @@ try {
   };
   function writeConfig(mode) {
     const db =
-        mode === "off"
+        mode === "review-only" ? "conductor_test_runtime_review" : mode === "off"
           ? "conductor_test_runtime_off"
           : "conductor_test_runtime_enabled",
       mongoURI = "mongodb://mongo:27017/" + db,
@@ -145,6 +145,7 @@ try {
             REMEDY_ORG_ID: "libretexts",
             REMEDY_API_BASE_URL: "https://engine:8443",
             REMEDY_API_KEY: config.key,
+            ...(mode === "review-only" ? {} : {
             REMEDY_REVIEWER_KEY_ENABLED: mode === "recover" ? "false" : "true",
             REMEDY_REVIEWER_SIGNING_KEY_FILE: "/fixture/signer.pem",
             REMEDY_REVIEWER_KEY_ID: config.kid,
@@ -152,6 +153,7 @@ try {
             REMEDY_REVIEWER_AUDIENCE: config.audience,
             REMEDY_REVIEWER_KEY_NOT_BEFORE: String(now - 120),
             REMEDY_REVIEWER_KEY_NOT_AFTER: String(now + 3600),
+            }),
           }),
     };
     fs.writeFileSync(
@@ -307,6 +309,7 @@ try {
   ]);
   await appPhase("enabled");
   await appPhase("recover");
+  await appPhase("review-only");
   report.passed = true;
 } catch (error) {
   report.passed = false;

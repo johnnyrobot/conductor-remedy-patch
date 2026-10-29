@@ -1,7 +1,7 @@
 # conductor-remedy-patch
 
 The **Conductor side** of the LibreTexts Remedy accessibility matrix, shipped as
-target-specific twenty-four-patch `git am` series against upstream Conductor, with
+target-specific twenty-six-patch `git am` series against upstream Conductor, with
 the original sixteen-patch delivery retained for history.
 
 This repository contains no Conductor source of its own. It is a delivery
@@ -9,7 +9,70 @@ vehicle: you clone the real Conductor, apply these commits, and you have the
 Project Accessibility WCAG matrix, the remediation work queue and the WCAG
 verification panel wired to a Remedy server.
 
+## Full integration and rollout choice
+
+The delivery retains one implementation of scanning, previews, signed apply and
+restore, operation status and explicit recovery. LibreTexts chooses its rollout
+timing and which approved capabilities to enable; a review-only rollout is an
+optional mode of this integration, not a separate build or replacement product.
+The independent engine/ADAPT Scanner does not require CXone. Conductor's book-page
+integration uses Remedy Server and Bridge; reading existing CXone pages still
+requires authorized read access.
+
+**Implementation delivered does not mean production writes are enabled.**
+Automatic CXone apply/restore remain gated on vendor-supported revision-atomic
+conditional writes and authorized validation. LibreTexts' integration/deployment
+team owns that evidence, coordinated configuration and write enablement. A
+signing key, passing fixture or UI checkbox does not clear the gate. No vendor
+outreach, live call or production write enablement is authorized by these docs.
+
+Select the optional mode explicitly with `REMEDY_BRIDGE_PROFILE=review-only`
+on Bridge, following the immutable
+[`cxone-review-v1` contract](https://github.com/johnnyrobot/libretexts-remedy-bridge-dev/blob/28f37e2b57d3cf05308c19f5e363ff6f782cd837/docs/release/lt-174-review-only-profile.md).
+Conductor consumes that authenticated profile through Server; there is no second
+Conductor mode flag. Scan+preview may be ready with mutate and operation status
+false, without Conductor signing keys. Unknown/malformed profiles fail closed;
+missing metadata retains legacy full-write requirements. Omitted Bridge profile
+retains the full signed mode and its existing write hold. Removing a signing key
+is not an explicit review-only selection.
+
+In review-only mode, automatic edits will be unavailable; users edit
+content through the normal book editor. A scan, preview or manual task checkbox
+does not establish that content is fixed or WCAG conformance is achieved. Manual
+external changes require a fresh canonical scan before current evidence can be
+claimed. Pending-operation status must not clear an unknown write or retry it.
+
+### Prerequisites and safe starting point
+
+Use Git, Node 22 and a fresh scratch Conductor checkout at one of the exact pins
+below. Apply the complete manifest, then run the validation commands in this
+README. Those steps reconstruct and test source; they do not enable a deployment.
+Never apply patches in an existing production checkout or the live development
+`conductor` / `conductor-idea` folders.
+
+Product validation requires Conductor's normal authentication and an isolated
+Mongo database; Linux fixture evidence used Mongo 7.0.14; current local LT-176 checks used isolated Mongo 8.0.5.
+Enabled book integration additionally requires the verified tenant/engine
+configuration below and authenticated access to its required services. Generated
+synthetic credentials belong only to disposable validation. Production keys,
+tenant mapping, private network/TLS settings and rollout belong to LibreTexts'
+deployment process.
+
+Start with [deterministic application](#apply-a-validated-target-series),
+[current tests and inherited typecheck limits](#validation), and the
+[configuration, storage and backup requirements](docs/integration/pinned-targets.md).
+After application, read `docs/remediation-integration.md`,
+`docs/remedy-storage-and-reads.md` and the recovery guide identified there in the
+patched Conductor checkout for signer, backup, upgrade and rollback procedures.
+The Server-owned `deploy/stack/README.md` is the coordinated deployment entry
+point. This patch repository alone is not a completed production deployment
+package; [Linux candidates and remaining limits](docs/releases/lt158-linux-candidate.md)
+identify what was actually validated.
+
 ---
+
+[LT-176 optional-mode implementation and compatibility evidence](docs/releases/lt176-optional-review.md)
+records the exact contract, component checks and remaining release gates.
 
 ## Apply a validated target series
 
@@ -20,10 +83,10 @@ targets selected by the Chief, not observations of the running production versio
 
 | Target | Manifest | Resulting source tree |
 |---|---|---|
-| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `03589d94ffba9b3ee79a97dcb71100ed7e0f92c3` |
-| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `90ef990f17c53d45c3d25404b19f1a55ea1c20f8` |
+| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `3f28edac429de440184f47dbd02c35a8a53768d1` |
+| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `08891ee1d3235b766291cbcb5c13977600b79599` |
 
-Each manifest lists its own twenty-four ordered patches and SHA-256 checksums. Use
+Each manifest lists its own twenty-six ordered patches and SHA-256 checksums. Use
 Node 22 and a fresh **detached** clone; the command refuses a wrong base, dirty
 checkout, active branch, changed patch or escaping path before application.
 
@@ -85,7 +148,8 @@ not the current target procedure.
 
 ## Features preserved from the original sixteen commits
 
-Three layers. Each layer is usable without the ones after it.
+The three layers below describe provenance. Install the complete selected
+manifest; partial layer installation is not a supported rollout mode.
 
 **Matrix (0001–0003)** — the original delivery.
 
@@ -212,7 +276,7 @@ A proven changed source/TOC target invalidates old evidence. Matched no-ops pres
 current evidence without rescanning; actual/unknown writes invalidate it. A status
 lookup is read-only and cannot clear a pending claim or repeat a write.
 
-### Production configuration policy
+### Feature opt-in and mode configuration
 
 Remedy must be explicitly enabled for the intended deployment/tenant, default
 disabled, with an explicit engine base and API key in production. LT-131 tracks
@@ -224,6 +288,19 @@ process's `ORG_ID` and stored `Project.orgID`, `REMEDY_API_BASE_URL` (explicit o
 and `REMEDY_API_KEY`. Legacy `PROJECT_REMEDY_*` aliases no longer enable Remedy. Do not infer that a missing key or a localhost
 fallback is acceptable in production. Do not expose a Bridge staff panel. See the
 [configuration and storage requirements](docs/integration/pinned-targets.md).
+
+For optional review-only, keep the Conductor opt-in/settings above. Bridge must
+add `REMEDY_BRIDGE_PROFILE=review-only` to its existing authorized read settings:
+`CXONE_INTEGRATION_ENABLED=true`, `SERVER_DOMAIN`, `SERVER_KEY`, `SERVER_SECRET`,
+`SERVER_USER` and protected `REMEDY_BRIDGE_SERVICE_KEY_FILE`. Server retains
+`APP_API_KEY`, `CXONE_INTEGRATION_ENABLED=true`, explicit `CXONE_BRIDGE_BASE_URL`
+and the private Bridge service-key file. Those are operator-provided protected
+values, not browser configuration. The authenticated health response must carry
+strict scan/preview/mutate/status booleans and the reviewed profile metadata.
+Conductor checks it again before page actions; crafted apply/restore requests
+cannot sign or persist an intent when mutation is unavailable. LLM/browser
+features remain optional and report their own failures. Historical status is
+optional for review readiness and never clears or retries a claim.
 
 Reviewed writes additionally require these signer settings (LT-148):
 
@@ -272,10 +349,10 @@ question flows. Full release validation still covers the coordinated stack.
 
 | Target | Server unit | Client unit | Authenticated route/Mongo | Builds |
 |---|---:|---:|---:|---|
-| Staging pinned `67301b35` | 62 pass | 293 pass | 66 pass | Client/server pass |
-| Released floor `352a657e` | 32 pass | 200 pass | 66 pass | Client/server pass |
+| Staging pinned `67301b35` | 62 pass | 295 pass | 73 pass | Client/server pass |
+| Released floor `352a657e` | 32 pass | 202 pass | 73 pass | Client/server pass |
 
-The current table records LT-127 checks; LT-140 historical checks used Node 22.20.0 / npm 10.9.3 with the matching target's
+The current table records LT-176 component checks; LT-140 historical checks used Node 22.20.0 / npm 10.9.3 with the matching target's
 previously installed, unchanged lockfile dependencies. Both built servers reached
 real `/health` 200 under production mode with synthetic configuration and isolated
 MongoDB **7.0.14**. These were macOS process boots. The earlier compatibility

@@ -17,7 +17,7 @@ let html = "<p><strong>Chapter</strong></p>",
   mode = "success",
   writes = 0,
   calls = 0,
-  scanCalls = 0;
+  scanCalls = 0, reviewOnly = false;
 const metadata = (outcome, operationID = randomUUID()) => ({
   operation_id: operationID,
   action: "cxone.apply",
@@ -51,6 +51,7 @@ const server = https.createServer(
       const body = raw ? JSON.parse(raw) : {};
       if (req.url === "/control") {
         if (body.mode) mode = body.mode;
+        if (body.reviewOnly !== undefined) reviewOnly = body.reviewOnly;
         if (body.resetHeading) html = "<p><strong>Chapter</strong></p>";
         if (body.resolve) {
           const value = operations.get(body.resolve);
@@ -76,12 +77,13 @@ const server = https.createServer(
       if (req.url === "/v1/cxone/health")
         return res.end(
           JSON.stringify({
-            ok: true,
+            ok: true, state: "ready",
+            ...(reviewOnly ? {profile:{contract:"cxone-review-v1",name:"review-only",required_capabilities:["scan","preview"],unavailable_reasons:[]}} : {}),
             capabilities: {
               scan: true,
               preview: true,
-              mutate: true,
-              operation_status: true,
+              mutate: !reviewOnly,
+              operation_status: !reviewOnly,
             },
           }),
         );

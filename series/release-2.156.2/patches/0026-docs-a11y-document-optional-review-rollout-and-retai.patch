@@ -1,0 +1,66 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: johnnyrobot <174211481+johnnyrobot@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 12:35:53 -0700
+Subject: [PATCH 26/26] docs(a11y): document optional review rollout and
+ retained write gate (LT-176)
+
+---
+ docs/remediation-integration.md | 45 +++++++++++++++++++++++++++++++++
+ 1 file changed, 45 insertions(+)
+
+diff --git a/docs/remediation-integration.md b/docs/remediation-integration.md
+index 08faface..44cd32fd 100644
+--- a/docs/remediation-integration.md
++++ b/docs/remediation-integration.md
+@@ -225,3 +225,48 @@ reviewer forms without another external scan or mutation. TOC merges likewise
+ clear source/rendered evidence and current preview when URL or numeric page ID
+ changes, preserving section identity, manual checkboxes and other history. A
+ title-only refresh on the same target preserves current evidence and preview.
++
++## Optional review-only rollout (LT-176)
++
++The full signed integration is retained. LibreTexts selects rollout timing and
++may select Bridge `REMEDY_BRIDGE_PROFILE=review-only` in the same deployment
++package. This is the immutable `cxone-review-v1` contract at Bridge commit
++`28f37e2b57d3cf05308c19f5e363ff6f782cd837`, documented in
++`docs/release/lt-174-review-only-profile.md` in that repository. Server commit
++`3fa8ed592bbe41f1f1a9adab4888dfaa1a9e2d71` was checked through actual HTTP
++forwarding; a completed Server deployment package is still a global release gate.
++
++Conductor uses its existing default-off `REMEDY_ENABLED`, exact `REMEDY_ORG_ID`
++matching process `ORG_ID` and stored project, explicit `REMEDY_API_BASE_URL` and
++`REMEDY_API_KEY`. It introduces no second local profile flag. The authenticated
++engine health response must explicitly carry this version/name and strict
++capabilities; missing profile metadata retains legacy full-write requirements,
++not implicit review-only selection. Unknown/malformed/inconsistent profiles
++fail closed. Readiness is checked again before page actions.
++
++Review-only requires scan+preview, permits mutate=false/operation_status=false,
++and does not read Conductor signing keys. Missing optional LLM/browser providers
++remain request-specific failures, not proof those capabilities work. No key or
++configuration switch enables writes in this profile. Apply/restore are rejected
++before Conductor signing, intent persistence or external mutation dispatch. The
++UI disables/hides their controls, preserves reports/reviewer notes, and directs
++manual edits to the normal book editor. A preview or task status is not a fix or
++conformance; changed external content requires fresh canonical evidence.
++
++Bridge still requires existing authorized CXone read settings `SERVER_DOMAIN`,
++`SERVER_KEY`, `SERVER_SECRET`, `SERVER_USER`, `CXONE_INTEGRATION_ENABLED=true`,
++and protected `REMEDY_BRIDGE_SERVICE_KEY_FILE`. Server retains `APP_API_KEY`,
++`CXONE_INTEGRATION_ENABLED=true`, explicit `CXONE_BRIDGE_BASE_URL` and the same
++private service-key file policy. Never expose those values to the browser. No
++read credentials are supplied by this delivery. Optional historical status uses
++the contract's query-only store/trust/issuer configuration; absent status cannot
++clear or retry a pending operation, and healthy status still enforces stored
++intent plus current project/session permissions.
++
++Omitted Bridge profile retains full-write implementation and all-four capability
++readiness/signing requirements. Automatic production writes remain held pending
++vendor-supported revision-atomic conditional-edit proof and authorized validation
++owned by LibreTexts' integration/deployment team. Existing explicit unknown-write
++recovery, append-only operation history, storage backup/upgrade/rollback policy
++and human conformance separation remain unchanged. Terminal-proof recovery
++LT-180 still awaits LT-179; no status-equality or generic unlock is added.
+-- 
+2.54.0 (Apple Git-157)
+

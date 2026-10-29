@@ -4,9 +4,9 @@
   "role": "primary",
   "upstreamRepository": "https://github.com/LibreTexts/conductor.git",
   "baseCommit": "67301b35c3784ed73ba1a65011ef5a1d689abca1",
-  "expectedTree": "03589d94ffba9b3ee79a97dcb71100ed7e0f92c3",
+  "expectedTree": "3f28edac429de440184f47dbd02c35a8a53768d1",
   "upstreamPackageVersion": "2.156.2",
-  "sourceCommit": "c38f0f8b9ffc9908c6f3986a6ecb53f235ab10c3",
+  "sourceCommit": "2c0177c76d1ff728d18c56f02051ffac004df010",
   "patches": [
     {
       "path": "patches/0001-feat-a11y-carry-CXone-pageID-on-review-sections-extr.patch",
@@ -103,6 +103,14 @@
     {
       "path": "patches/0024-build-pin-the-existing-Node22-Linux-recipe-to-an-imm.patch",
       "sha256": "d351f10c856937db6e50f8ab40a53f89bf1769859d92d28d75ee6c35115023af"
+    },
+    {
+      "path": "patches/0025-feat-a11y-support-explicit-authenticated-review-only.patch",
+      "sha256": "55006707255f4fb09f69515eb50e51cacef8f533d65b54680aa4d5ebe57382f4"
+    },
+    {
+      "path": "patches/0026-docs-a11y-document-optional-review-rollout-and-retai.patch",
+      "sha256": "838c85922fa59a98e70d37ae8b527c1c97353af9e5ae113f5e03e9b5434b6df4"
     }
   ],
   "upstreamScripts": {
@@ -201,5 +209,12 @@
     "sourceTree": "03589d94ffba9b3ee79a97dcb71100ed7e0f92c3",
     "fullOwnedStackLinuxVerified": false,
     "productionApproval": false
+  },
+  "capabilityContract": {
+    "name": "cxone-review-v1",
+    "bridgeCommit": "28f37e2b57d3cf05308c19f5e363ff6f782cd837",
+    "serverCommitTested": "3fa8ed592bbe41f1f1a9adab4888dfaa1a9e2d71",
+    "optionalReviewOnly": true,
+    "productionWriteEnablementVerified": false
   }
 }

@@ -148,6 +148,7 @@ assert.equal(
   200,
   "ordinary authenticated project access",
 );
+if (phase === "review-only") await control({reviewOnly:true,resetHeading:true});
 const readiness = await request(
   matrix + "/health?projectID=" + config.projectID,
 );
@@ -351,6 +352,26 @@ if (phase === "off") {
     writeRetries: 0,
     humanVerifiedCriteria: 0,
   };
+ } else if (phase === "review-only") {
+  assert.equal(readiness.data.available,true,JSON.stringify(readiness.data));
+  assert.equal(readiness.data.profile.name,"review-only");
+  assert.deepEqual(readiness.data.capabilities,{scan:true,preview:true,mutate:false,operation_status:false});
+  assert.equal(process.env.REMEDY_REVIEWER_SIGNING_KEY_FILE,undefined);
+  assert.equal((await request(matrix+"/scan","POST",input,"auditor")).status,403);
+  const before=(await control()).writes;
+  assert.equal((await request(matrix+"/scan","POST",input)).status,200);
+  const preview=await request(matrix+"/preview","POST",input);
+  assert.equal(preview.status,200,JSON.stringify(preview.data));
+  const original=await db.collection("projects").findOne({projectID:config.projectID});
+  for(const path of [matrix+"/apply",base+"/page/"+config.sectionID+"/apply",base+"/page/"+config.sectionID+"/restore"]){
+    const response=await request(path,"POST",{...input,localReviewID:preview.data.localReviewID,previewToken:preview.data.preview_token,previewHash:preview.data.preview_hash,confirmed:true});
+    assert.equal(response.status,503,JSON.stringify(response.data));
+  }
+  assert.deepEqual(await db.collection("projects").findOne({projectID:config.projectID}),original);
+  assert.equal(await db.collection("remedyoperationrecords").countDocuments({projectID:config.projectID}),0);
+  assert.equal((await control()).writes,before);
+  assert.equal((await request(base+"/conformance")).data.report.verifiedCriteria,0);
+  observation={...observation,reviewOnlyWithoutSigner:true,scanAndPreview:true,craftedWritesDenied:true,noIntentOrPreviewConsumption:true,externalMutationDelta:0,humanVerifiedCriteria:0};
 } else throw Error("Unknown fixture phase");
 await client.close();
 process.stdout.write(JSON.stringify(observation) + "\n");
