@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: johnnyrobot <174211481+johnnyrobot@users.noreply.github.com>
-Date: Thu, 29 Oct 2026 04:33:17 -0700
+Date: Thu, 29 Oct 2026 04:45:09 -0700
 Subject: [PATCH] feat(a11y): require explicit tenant opt-in and engine
  readiness
 
@@ -203,7 +203,7 @@ index 9058c561..0d9f3eb6 100644
                                                                                      />
                                                                                  )}
 diff --git a/docs/remediation-integration.md b/docs/remediation-integration.md
-index fee192ac..49770311 100644
+index fee192ac..af3b30a3 100644
 --- a/docs/remediation-integration.md
 +++ b/docs/remediation-integration.md
 @@ -18,7 +18,7 @@ Queue records persist in MongoDB with a unique project/finding key, optimistic v
@@ -249,7 +249,7 @@ index fee192ac..49770311 100644
 +
 +Feature models are compiled lazily after a configured, authorized request.
 +They explicitly disable automatic collection/index creation. The first enabled
-+feature request/preflight creates only `remediationworkitems` and
++health preflight or authorized work-queue request creates only `remediationworkitems` and
 +`conformancerecords` and builds their declared indexes before exposing readiness:
 +unique `{projectID:1,key:1}` for work-item deduplication and
 +`{projectID:1,kind:1,createdAt:-1}` for conformance history lookup, plus Mongo `_id`.

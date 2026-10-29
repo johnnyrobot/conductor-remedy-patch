@@ -8,8 +8,8 @@ Atlas tier, cluster topology and orchestrator are unknown.
 
 | Role | Upstream commit | Version context | Delivered tree |
 |---|---|---|---|
-| Primary staging | `67301b35c3784ed73ba1a65011ef5a1d689abca1` | Root package says 2.156.2; Chief assessment reported image label 2.157.0-rc.4 | `86c72dd47fb2a7b673e2d7dacf21292ad949cc3b` |
-| Secondary released floor | `352a657ec6de7b317a70ad3f8f744bc6d5054d9d` | v2.156.2 | `7761cfed5421c3666f2ceaae62ff0f48522d1b75` |
+| Primary staging | `67301b35c3784ed73ba1a65011ef5a1d689abca1` | Root package says 2.156.2; Chief assessment reported image label 2.157.0-rc.4 | `a87b1deeff6297d9e3fe54ae03426d77e12ab704` |
+| Secondary released floor | `352a657ec6de7b317a70ad3f8f744bc6d5054d9d` | v2.156.2 | `7f89aabab8acdc5417dc69d3cc8af2e13e63634c` |
 
 The image label is assessment context, not a pulled/booted image or observation of
 production. Do not use `latest`; approved deployment must pin compatible image
@@ -171,7 +171,7 @@ config controls; the compatibility table above remains historical evidence.
 | Existing `projects.a11yReview` | Stable section `_id`, source/rendered fingerprints, evidence revision and pending-write state |
 
 These models compile lazily and disable automatic collection/index creation.
-Configured authorized feature requests/preflight explicitly create the two
+Configured health preflight and authorized work-queue requests explicitly create the two
 collections and declared indexes; failures report unavailable and do not crash
 unrelated startup. Successful readiness is cached in-process; external index
 changes require operator preflight/restart. Generic Mongo connection health alone

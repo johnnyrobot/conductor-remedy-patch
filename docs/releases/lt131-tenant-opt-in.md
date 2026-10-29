@@ -20,7 +20,7 @@ The actual mounted Project Accessibility page follows this server result while
 ordinary matrix controls and unrelated Conductor functionality remain usable.
 
 Feature models compile lazily. Automatic collection/index creation is disabled;
-the first enabled authorized request/preflight explicitly creates the two
+the first enabled health preflight or authorized work-queue request creates the two
 collections and declared indexes. Privilege, duplicate-data or storage failures
 report feature unavailable without crashing unrelated startup or deleting data.
 The [target guide](../integration/pinned-targets.md) and delivered

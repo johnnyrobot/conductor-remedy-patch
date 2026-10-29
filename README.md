@@ -20,8 +20,8 @@ targets selected by the Chief, not observations of the running production versio
 
 | Target | Manifest | Resulting source tree |
 |---|---|---|
-| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `86c72dd47fb2a7b673e2d7dacf21292ad949cc3b` |
-| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `7761cfed5421c3666f2ceaae62ff0f48522d1b75` |
+| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `a87b1deeff6297d9e3fe54ae03426d77e12ab704` |
+| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `7f89aabab8acdc5417dc69d3cc8af2e13e63634c` |
 
 Each manifest lists its own nineteen ordered patches and SHA-256 checksums. Use
 Node 22 and a fresh **detached** clone; the command refuses a wrong base, dirty

@@ -4,9 +4,9 @@
   "role": "primary",
   "upstreamRepository": "https://github.com/LibreTexts/conductor.git",
   "baseCommit": "67301b35c3784ed73ba1a65011ef5a1d689abca1",
-  "expectedTree": "86c72dd47fb2a7b673e2d7dacf21292ad949cc3b",
+  "expectedTree": "a87b1deeff6297d9e3fe54ae03426d77e12ab704",
   "upstreamPackageVersion": "2.156.2",
-  "sourceCommit": "e065d365441cccc5caacd50945beb9efbe50efb4",
+  "sourceCommit": "ff1dca0b59a73385034698453f49ebd620d486ad",
   "patches": [
     {
       "path": "patches/0001-feat-a11y-carry-CXone-pageID-on-review-sections-extr.patch",
@@ -82,7 +82,7 @@
     },
     {
       "path": "patches/0019-feat-a11y-require-explicit-tenant-opt-in-and-engine-.patch",
-      "sha256": "5afc5a2054976f2bca26b7a663f3888419445f37069b3740cdcec990b1f909d4"
+      "sha256": "1281720c377b078cf2012fb5cb971f2b141ff4f34dedcdc48b10eb9ea8226ebb"
     }
   ],
   "upstreamScripts": {
