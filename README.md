@@ -1,7 +1,8 @@
 # conductor-remedy-patch
 
 The **Conductor side** of the LibreTexts Remedy accessibility matrix, shipped as
-sixteen `git am`-able patches against upstream Conductor.
+target-specific seventeen-patch `git am` series against upstream Conductor, with
+the original sixteen-patch delivery retained for history.
 
 This repository contains no Conductor source of its own. It is a delivery
 vehicle: you clone the real Conductor, apply these commits, and you have the
@@ -10,40 +11,54 @@ verification panel wired to a Remedy server.
 
 ---
 
-## Apply it
+## Apply a validated target series
+
+The recommended integration base is now upstream **staging pinned to
+`67301b35c3784ed73ba1a65011ef5a1d689abca1`**. The secondary released floor is
+**v2.156.2 at `352a657ec6de7b317a70ad3f8f744bc6d5054d9d`**. These are delivery
+targets selected by the Chief, not observations of the running production version.
+
+| Target | Manifest | Resulting source tree |
+|---|---|---|
+| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `5e49cc22e134f98dbad29a4ee4a7b8a1c1a13b26` |
+| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `61636f304ca81b983a481eb266ccf0550452e05f` |
+
+Each manifest lists its own seventeen ordered patches and SHA-256 checksums. Use
+Node 22 and a fresh **detached** clone; the command refuses a wrong base, dirty
+checkout, active branch, changed patch or escaping path before application.
 
 ```bash
-git clone https://github.com/LibreTexts/conductor.git
-cd conductor
-git checkout -b feat/remedy-a11y-wiring 1c1a5ec103b76b6f47de9917204784fc3bba1eb0
-git am -3 /path/to/conductor-remedy-patch/patches/*.patch
+conductor_delivery=/absolute/path/to/conductor-remedy-patch
+conductor_checkout=/tmp/conductor-remedy-staging
+
+git clone https://github.com/LibreTexts/conductor.git "$conductor_checkout"
+git -C "$conductor_checkout" checkout --detach 67301b35c3784ed73ba1a65011ef5a1d689abca1
+node "$conductor_delivery/tools/apply-series.mjs" \
+  "$conductor_delivery/series/staging-67301b35/manifest.json" "$conductor_checkout"
 ```
 
-That is the whole procedure. The patches were generated against — and verified
-to apply cleanly onto — upstream `LibreTexts/conductor` at:
+For the released floor, select commit `352a657ec6de7b317a70ad3f8f744bc6d5054d9d`
+and `series/release-2.156.2/manifest.json` in a separate fresh clone. `--check`
+performs the manifest/checkout preflight without applying patches. A successful
+application verifies the final tree; it is not a production deployment approval.
+Applied commit IDs may vary with committer metadata; the expected source tree is
+fixed. No automatic fetch, reset, abort, cleanup or push occurs.
 
-| | |
-|---|---|
-| Base commit | `1c1a5ec1` |
-| Release | `2.144.0` |
-| Branch | `master` |
+[Compatibility evidence, config policy and Mongo operations](docs/integration/pinned-targets.md)
+explain the preserved upstream scripts, target-specific test corrections and open
+release gates. **Production readiness is false** in both manifests. LT-131 still
+must implement server-enforced tenant opt-in/default disabled; a client flag is
+not enforcement. Never deploy an image selected by `latest`.
 
-The earlier fourteen-patch series was also verified against upstream `master` at `b0401094` (release `2.151.0`,
-2026-09-02): with `-3`, thirteen patches apply untouched and patch 0001 stops on
-one trivial conflict in `server/package.json` — upstream changed the adjacent
-`"dev"` script line. Keep upstream's `"dev"` line, keep the added `"test"`
-line, `git add`, `git am --continue`, and the remaining thirteen go through.
-
-That drift check predates patch 0015; the supported base remains the pinned commit above.
-
-If upstream has moved further and a hunk no longer applies, `git am` stops and
-tells you which file. Resolve, `git add`, `git am --continue`. The files most
-likely to drift: `server/api.js` (route table), `server/package.json`
-(scripts) and `client/src/components/projects/ProjectAccessibility.jsx`.
+The original sixteen patches in [`patches/`](patches/) and their old
+`1c1a5ec1` base remain intact for historical reproduction of PR #3. That base is
+retired as the recommendation for new integration. Do not apply the historical
+root glob to either new target. The old first-wave report is historical evidence,
+not the current target procedure.
 
 ---
 
-## The sixteen commits
+## Features preserved from the original sixteen commits
 
 Three layers. Each layer is usable without the ones after it.
 
@@ -98,10 +113,8 @@ callers must now send `sectionID`; browser URLs and page IDs are ignored.
 See [first-wave validation and remaining release gates](docs/releases/lt115-first-wave.md).
 This is a release fix, not a declaration that the whole stack is ready to deploy.
 
-Applying only commits 1 and 2 gives you a working API with no UI, which is a
-reasonable way to test the server integration on its own. Stopping after 3
-gives you the matrix as originally shipped; after 7, the work queue; after 10,
-verification; after 14, the apply-path safeguards; after 16, the shared authorization and evidence lifecycle safeguards.
+Install the complete selected manifest. The layer list describes historical
+provenance, not supported partial installations.
 
 ### Original fourteen-patch footprint
 
@@ -157,55 +170,29 @@ All under the existing authenticated project API:
 | GET | `/project/:projectID/accessibility/workqueue/conformance/report` | Authenticated export of that report. |
 | POST | `/project/:projectID/accessibility/workqueue/conformance/:action` | `scope`, `review`, `signoff`. Reviewer identity and timestamp are server-set; records are append-only. |
 
-The matrix, work-queue and conformance routes reuse the project's edit permission
-check. Nothing in them writes to CXone directly — every write goes through the
+Matrix, work-queue and conformance mutations require project edit permission.
+Work-queue and conformance GET requests provide read access to authorized project users. Nothing in them writes to CXone directly — every write goes through the
 bridge, which enforces its own sandbox guard.
 
 **A write must be bound to a reviewed preview.** The client sends the preview hash
 back and the server rejects a stale one, so a page that changed between preview
 and apply fails closed rather than overwriting someone's edit.
 
-### Environment variables
+### Production configuration policy
 
-Server:
+Remedy must be explicitly enabled for the intended deployment/tenant, default
+disabled, with an explicit engine base and API key in production. LT-131 tracks
+the server enforcement and useful unavailable/preflight responses. The current
+series still has legacy enablement/fallback behavior, so it is **not approved for
+production**. `CLIENT__REMEDY_ENABLED` alone cannot enforce this policy.
 
-| Variable | Notes |
-|---|---|
-| `REMEDY_API_BASE_URL` | Remedy server base URL. `PROJECT_REMEDY_BASE_URL` is accepted as an alias. |
-| `REMEDY_API_KEY` | Sent as the `X-API-Key` header. `PROJECT_REMEDY_API_KEY` is accepted as an alias. |
-
-Client (Conductor's `CLIENT__*` passthrough):
-
-| Variable | Notes |
-|---|---|
-| `CLIENT__REMEDY_ENABLED` | `"true"` to show the Remedy controls in the matrix. |
-| `CLIENT__REMEDY_PANEL_URL` | Do not point this at a publicly exposed Bridge staff panel; non-loopback exposure remains blocked by LT-1. |
-
-If `REMEDY_API_KEY` is unset the header is simply omitted, which is fine against
-a Remedy server that does not require one.
-
-### Compose wiring
-
-Conductor has to be able to resolve the Remedy server by name, which means
-joining Remedy's external Docker network:
-
-```yaml
-services:
-  conductor:
-    environment:
-      REMEDY_API_BASE_URL: http://remedy-server:8000
-      REMEDY_API_KEY: ${REMEDY_API_KEY}
-      CLIENT__REMEDY_ENABLED: "true"
-    networks: [cond, remedy_net]
-
-networks:
-  remedy_net:
-    external: true
-    name: libretexts_remedy
-```
-
-Forgetting the `networks:` entry is the most common failure: the app starts
-fine, and the health endpoint just reports the Remedy server as unreachable.
+Existing engine settings are `REMEDY_API_BASE_URL` and `REMEDY_API_KEY` (legacy
+`PROJECT_REMEDY_*` aliases exist). Do not infer that a missing key or a localhost
+fallback is acceptable in production. Do not expose a Bridge staff panel. See the
+[configuration and storage requirements](docs/integration/pinned-targets.md).
+The approved full-stack deployment bundle must supply immutable image digests,
+network/auth/origin settings, backup/upgrade and rollback details; this repository
+does not yet provide that completed bundle.
 
 ---
 
@@ -222,30 +209,49 @@ repositories:
 
 **Read `deploy/stack/README.md` in `libretexts-remedy-server` before deploying.**
 It has the only compose file that runs all three together, and the failure modes
-that are not obvious from the individual READMEs. Running the Conductor
-accessibility matrix needs all three services.
+that are not obvious from the individual READMEs. The Conductor matrix uses the engine and Bridge; ADAPT scanner covers ADAPT
+question flows. Full release validation still covers the coordinated stack.
 
 ---
 
-## Tests
+## Validation
+
+| Target | Server unit | Client unit | Authenticated route/Mongo | Builds |
+|---|---:|---:|---:|---|
+| Staging pinned `67301b35` | 55 pass | 270 pass | 12 pass | Client/server pass |
+| Released floor `352a657e` | 25 pass | 177 pass | 12 pass | Client/server pass |
+
+Fresh `npm ci` and checks used Node 22.20.0 / npm 10.9.3. Both built servers also
+reached real `/health` 200 under production mode with synthetic configuration and
+isolated MongoDB 8.0.5. This was a macOS process boot, **not a Docker image boot**.
+Standalone server typechecks still report the same 60 baseline diagnostic lines
+on each target; builds do not imply a clean full typecheck. Details and baseline
+failures/corrections are in the compatibility guide. Linux/container, real
+providers, production auth/topology and deployment remain unverified.
 
 ```bash
-cd server && npm test      # tsx --test — 25 tests: a11yreviewutils, remediation queue/actions, conformance, handoff, CORS
-cd client && npm test      # vitest — 23 tests: accessibilityScore, RemediationPageActions, ConformanceReview
+# In this delivery repo, Node 22; no npm dependency installation is needed:
+node --test tools/apply-series.test.mjs
+
+# In the freshly patched Conductor checkout:
+cd server
+npm ci --no-audit --no-fund
+npm test
+npm run build
+cd ../client
+npm ci --no-audit --no-fund
+npm test
+npm run build
 ```
 
-Both suites, `tsc --noEmit` and `vite build` in `client/` were run on the
-patched tree at base `1c1a5ec1` before this set was published. The line counts
-above are net additions measured on that tree.
-
-The scoring tests are worth reading before changing anything: the denominator
-counts only pass/fail criteria. Manual-review and not-tested criteria are
-reported separately rather than folded in as failures, so an unreviewed project
-scores `null` ("not scored") instead of 0%.
+The route integration suite requires an isolated loopback database named with
+`conductor_test_`; it drops that test database on teardown. See the guide before
+running it. The default unit runners do not run the independent Playwright visual
+journey. All upstream dev/test/visual commands and dependencies are retained.
 
 ---
 
-## Why patches instead of a branch
+## Historical provenance
 
 The branch these came from lives in a private development fork alongside
 unrelated deployment work. Exporting the three commits keeps the delivery to

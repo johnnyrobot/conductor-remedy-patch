@@ -1,0 +1,102 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Conductor Patch Dev <johnnyrobot@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 01:47:28 -0700
+Subject: [PATCH 17/17] fix(a11y): preserve matrix no-op and target test
+ coverage
+
+LT-130, LT-132: retain the omitted fork matrix no-op presentation regression
+and verify matrix apply attribution through the real authenticated router.
+
+Author-Model: GPT-6
+---
+ .../projects/ProjectAccessibility.jsx         |  9 +++---
+ .../projects/ProjectAccessibility.test.jsx    | 32 +++++++++++++++++++
+ server/integration/remedy-routes.test.ts      | 14 ++++++++
+ 3 files changed, 51 insertions(+), 4 deletions(-)
+ create mode 100644 client/src/components/projects/ProjectAccessibility.test.jsx
+
+diff --git a/client/src/components/projects/ProjectAccessibility.jsx b/client/src/components/projects/ProjectAccessibility.jsx
+index 171b3bfdc83e175f59acf680b08bd80690d3bb7b..9058c56138231590796c930bd2c36e4b0d5b28e8 100644
+--- a/client/src/components/projects/ProjectAccessibility.jsx
++++ b/client/src/components/projects/ProjectAccessibility.jsx
+@@ -389,12 +389,13 @@ const PreviewDiffPanel = ({ previewData, selectedCount, panelRef }) => {
+     );
+ };
+ 
+-const ApplyResultPanel = ({ applyResult }) => {
++export const ApplyResultPanel = ({ applyResult }) => {
+     if (!applyResult) return null;
++    const wroteNothing = applyResult.applied === false;
+     return (
+-        <Segment color='green' className='mt-1p'>
+-            <Header as='h4'>{applyResult.applied === false ? 'No changes written' : 'Apply complete'}</Header>
+-            <p>{applyResult.applied === false ? 'The reviewed preview did not change the page.' : 'Remedy wrote the selected changes.'} {applyResult.scanError ? 'Fresh scan evidence is still required.' : 'The page scan was refreshed. Reviewer verification remains independent.'}</p>
++        <Segment color={wroteNothing ? 'yellow' : 'green'} className='mt-1p'>
++            <Header as='h4'>{wroteNothing ? 'No changes were written' : 'Apply complete'}</Header>
++            <p>{wroteNothing ? 'No changes were written: the preview contained no content change.' : 'Remedy wrote the selected changes.'} {applyResult.scanError ? 'Fresh scan evidence is still required.' : 'The page scan was refreshed. Reviewer verification remains independent.'}</p>
+             {applyResult.scanError && <p role='alert'>{applyResult.scanError}</p>}
+             {applyResult.revision_summary && <p><strong>Revision:</strong> {applyResult.revision_summary}</p>}
+             {applyResult.snapshot_path && <p><strong>Snapshot:</strong> {applyResult.snapshot_path}</p>}
+diff --git a/client/src/components/projects/ProjectAccessibility.test.jsx b/client/src/components/projects/ProjectAccessibility.test.jsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..f5c347b02f63ad11e8094cdcebf320fa80b866f0
+--- /dev/null
++++ b/client/src/components/projects/ProjectAccessibility.test.jsx
+@@ -0,0 +1,32 @@
++import React, { act } from 'react';
++import { createRoot } from 'react-dom/client';
++import { expect, test } from 'vitest';
++import { ApplyResultPanel } from './ProjectAccessibility';
++
++(globalThis).IS_REACT_ACT_ENVIRONMENT = true;
++
++test('matrix apply reports an empty write without claiming success', async () => {
++    const container = document.createElement('div');
++    document.body.appendChild(container);
++    const root = createRoot(container);
++
++    try {
++        await act(async () => root.render(
++            <ApplyResultPanel applyResult={{
++                applied: false,
++                attempted_rule_ids: ['duplicate-id'],
++                applied_rule_ids: [],
++            }} />,
++        ));
++
++        expect(container.textContent).toContain(
++            'No changes were written: the preview contained no content change.',
++        );
++        expect(container.textContent).not.toContain('Apply complete');
++        expect(container.textContent).not.toContain('Remedy wrote the selected changes');
++        expect(container.querySelector('.ui.green.segment')).toBeNull();
++    } finally {
++        await act(async () => root.unmount());
++        container.remove();
++    }
++});
+diff --git a/server/integration/remedy-routes.test.ts b/server/integration/remedy-routes.test.ts
+index c851fc4c7c43cc43ea3ff4aaf4175d48fc5b50fb..97cf42f4ad26ef02a832e750eff88664a00d0b66 100644
+--- a/server/integration/remedy-routes.test.ts
++++ b/server/integration/remedy-routes.test.ts
+@@ -177,3 +177,17 @@ test('a scan during an outstanding write cannot make the old review current', as
+     assert.equal(calls.filter(c => c.path.endsWith('/apply-fix')).length, 1);
+   } finally { release(); await writing; }
+ });
++
++
++test('matrix apply forwards only session-derived reviewer attribution and the stored target', async () => {
++  const response = await request(`${matrix}/apply`, 'POST', {
++    ...input(), requested_by: users.outsider,
++    sectionURL: 'https://foreign.invalid/Sandboxes/other', pageID: 'forged',
++  });
++  assert.equal(response.status, 200);
++  const sent = calls.find(c => c.path.endsWith('/apply-fix'))!.body;
++  assert.equal(sent.requested_by, users.editor);
++  assert.equal(sent.page_url, page);
++  assert.equal(sent.page_id, undefined);
++  assert.equal(sent.preview_token, 'synthetic-token');
++});
+-- 
+2.54.0 (Apple Git-157)
+

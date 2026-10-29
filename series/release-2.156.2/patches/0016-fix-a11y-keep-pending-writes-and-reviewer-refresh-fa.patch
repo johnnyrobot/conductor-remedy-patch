@@ -1,0 +1,277 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Conductor Patch Dev <johnnyrobot@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 00:13:24 -0700
+Subject: [PATCH 16/17] fix(a11y): keep pending writes and reviewer refresh
+ fail closed
+
+LT-117: persist the write claim, block overlapping actions, and retain invalid
+conformance evidence on interrupted or uncertain writes pending reconciliation.
+LT-109: refresh the mounted parent reviewer evidence after failed rescans too.
+Add actual-route overlap and mounted-panel regressions from review findings.
+
+Author-Model: GPT-6
+---
+ .../projects/ConformanceReview.test.tsx       | 32 ++++++++++-
+ .../projects/RemediationPageActions.tsx       |  4 +-
+ server/api/remediationactions.ts              | 55 ++++++++++++-------
+ server/integration/remedy-routes.test.ts      | 20 ++++++-
+ server/util/a11yreviewutils.ts                |  1 +
+ server/util/conformance.ts                    |  2 +
+ 6 files changed, 89 insertions(+), 25 deletions(-)
+
+diff --git a/client/src/components/projects/ConformanceReview.test.tsx b/client/src/components/projects/ConformanceReview.test.tsx
+index c0c054d486f1dbcc720b89a0a06b7af450868667..49f7d16ff9846af9e10534019e94ee2844f26faa 100644
+--- a/client/src/components/projects/ConformanceReview.test.tsx
++++ b/client/src/components/projects/ConformanceReview.test.tsx
+@@ -2,10 +2,11 @@ import React from 'react';
+ import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+ import { afterEach, test, expect, vi } from 'vitest';
+ import ConformanceReview from './ConformanceReview';
++import RemediationPageActions from './RemediationPageActions';
+ 
+ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+ 
+-function setup() {
++function setup(includePageActions = false) {
+   let fingerprint: string | null = 'evidence-A';
+   let scopeVersion = 'scope-1';
+   const submissions: any[] = [];
+@@ -17,7 +18,20 @@ function setup() {
+       verificationPercent: 0, verifiedCriteria: 0, totalCriteria: 50, status: 'verification_pending', readyForSignoff: false, digest: 'digest', remediationHandoff: null,
+     } }) };
+   }));
+-  render(<ConformanceReview projectID="synthetic" sections={[]} />);
++  function Host() {
++    const [sections, setSections] = React.useState<any[]>([]);
++    return <><ConformanceReview projectID="synthetic" sections={sections} />
++      {includePageActions && <RemediationPageActions base="/synthetic" section={{ id: 'page1', title: 'Synthetic article' }}
++        item={{ _id: 'item1', ruleId: 'img-alt', selector: 'img' }}
++        request={async (url: string) => {
++          if (url.endsWith('/scan')) return { findings: [{ id: 'finding1', ruleId: 'img-alt', selector: 'img', fixable: true }], page_url: 'https://fixture.invalid/' };
++          if (url.endsWith('/preview')) return { before_html: '<p>old</p>', after_html: '<p>new</p>' };
++          fingerprint = null;
++          return { applied: true, writeOutcome: 'written', scan: null, scanError: 'Write completed, but rescan failed.' };
++        }} refreshed={async () => {}} onScanSaved={() => setSections([{}])} close={() => {}} />}
++    </>;
++  }
++  render(<Host />);
+   return { submissions, changeEvidence(value: string | null) { fingerprint = value; }, changeScope(value: string) { scopeVersion = value; } };
+ }
+ async function fillReview() {
+@@ -74,3 +88,17 @@ test('invalidated evidence cannot be confirmed and saved', async () => {
+   expect(screen.getByRole('button', { name: 'Save reviewer evidence' })).toBeDisabled();
+   expect(fixture.submissions).toEqual([]);
+ });
++
++test('a completed queue write with failed rescan invalidates the mounted reviewer form', async () => {
++  setup(true);
++  await fillReview();
++  fireEvent.click(screen.getByRole('button', { name: 'Rescan page' }));
++  await screen.findByRole('button', { name: 'Preview selected fix' });
++  fireEvent.click(screen.getByRole('button', { name: 'Preview selected fix' }));
++  fireEvent.click(await screen.findByLabelText(/I reviewed this preview/));
++  fireEvent.click(screen.getByRole('button', { name: 'Apply reviewed fix and rescan' }));
++  await screen.findByText(/Write completed, but rescan failed/);
++  await waitFor(() => expect(screen.getByLabelText(/I performed this review/)).not.toBeChecked());
++  expect(screen.getByLabelText('Compare every image with its description')).not.toBeChecked();
++  expect(screen.getByRole('button', { name: 'Save reviewer evidence' })).toBeDisabled();
++});
+diff --git a/client/src/components/projects/RemediationPageActions.tsx b/client/src/components/projects/RemediationPageActions.tsx
+index 4abc038ff9c02c35ef6ac3b1468816497f118c16..40fe1b63b3ea2b4fea0083c19a138013242ee47d 100644
+--- a/client/src/components/projects/RemediationPageActions.tsx
++++ b/client/src/components/projects/RemediationPageActions.tsx
+@@ -50,7 +50,9 @@ export default function RemediationPageActions({ base, section, item, request, r
+         setAltEdits({}); setLongEdits({}); setPreview({ ...result, kind: action === 'preview' ? 'apply' : 'restore' });
+       } else {
+         const result = await call(action, { findingIDs: selected, fixMode: mode === 'deterministic' ? mode : 'pipeline', previewHash: preview.preview_hash, previewToken: preview.preview_token });
+-        invalidate(); if (result.scan) { selectFindings(result.scan); if (!result.scanError) onScanSaved?.(); }
++        invalidate(); if (result.scan) selectFindings(result.scan);
++        // A write invalidates reviewer evidence even when the following scan fails.
++        onScanSaved?.();
+         if (result.snapshot_path) setLastSnapshot(result.snapshot_path.split('/').pop());
+         const wroteNothing = action === 'apply' && result.applied === false;
+         const outcome = wroteNothing
+diff --git a/server/api/remediationactions.ts b/server/api/remediationactions.ts
+index e73f161967914ad2213ed07bf527fedc44d460c9..35b0e075e7f85416c4885ebc7771e3b89a184683 100644
+--- a/server/api/remediationactions.ts
++++ b/server/api/remediationactions.ts
+@@ -8,11 +8,31 @@ export function createRemediationActionHandler({ Project, WorkItems, bridge = ca
+   return async (req: any, res: any) => {
+     let section: any;
+     let writeOutcome: string | undefined;
++    let evidenceVersion = 0;
++    const action = req.params.action;
++    const isWrite = action === 'apply' || action === 'restore';
++    const invalidate = async (message: string, pendingWrite?: boolean, claim = false) => {
++      const match: any = { _id: section._id };
++      if (claim || !isWrite) match.remedyWritePending = { $ne: true };
++      const update = await Project.updateOne({ projectID: req.params.projectID, a11yReview: { $elemMatch: match } }, {
++        $unset: { 'a11yReview.$.wcagReview.rendered': '', 'a11yReview.$.wcagReview.sourceHash': '' },
++        $set: { 'a11yReview.$.remedyError': message,
++          ...(pendingWrite === undefined ? {} : { 'a11yReview.$.remedyWritePending': pendingWrite }) },
++        $inc: { 'a11yReview.$.remedyEvidenceVersion': 1 },
++      });
++      if (update?.acknowledged === false || update?.matchedCount === 0) {
++        const error: any = Error('Page evidence could not be invalidated. Another write may require reconciliation.');
++        error.publicMessage = error.message;
++        if (claim && update?.matchedCount === 0) error.status = 409;
++        throw error;
++      }
++      evidenceVersion++;
++    };
+     try {
+       section = (req.queueProject.a11yReview || []).find((s: any) => String(s._id) === req.params.sectionID);
+       if (!section) return res.status(404).json({ err: true, errMsg: 'Page is not in this project.' });
++      if (section.remedyWritePending) return res.status(409).json({ err: true, writeOutcome: isWrite ? 'not_started' : undefined, errMsg: 'A previous page write is pending or its outcome is unknown. Reconcile it before scanning or writing again.' });
+       const endpoints: Record<string, string> = { scan: 'scan', 'rendered-scan': 'scan', preview: 'preview-fix', 'describe-image': 'preview-fix', 'revise-preview': 'revise-preview', apply: 'apply-fix', snapshots: 'snapshots', 'restore-preview': 'restore-preview', restore: 'restore' };
+-      const action = req.params.action;
+       if (!endpoints[action]) return res.status(400).json({ err: true, errMsg: 'Unknown page action.' });
+       const url = new URL(section.sectionURL);
+       const path = decodeURIComponent(url.pathname);
+@@ -21,7 +41,7 @@ export function createRemediationActionHandler({ Project, WorkItems, bridge = ca
+       }
+       const item = req.body.itemID ? await WorkItems.findOne({ _id: req.body.itemID, projectID: req.params.projectID, sectionID: req.params.sectionID }).lean() : null;
+       if (req.body.itemID && !item) return res.status(404).json({ err: true, errMsg: 'Work item is not on this project page.' });
+-      let evidenceVersion = section.remedyEvidenceVersion || 0;
++      evidenceVersion = section.remedyEvidenceVersion || 0;
+       const page = { page_url: section.sectionURL, section_title: section.sectionTitle };
+       // Browser-provided URLs, IDs, snapshots paths and scan evidence are never forwarded.
+       const body = { ...page, finding_ids: req.body.findingIDs, fix_mode: req.body.fixMode,
+@@ -32,7 +52,7 @@ export function createRemediationActionHandler({ Project, WorkItems, bridge = ca
+       const scan = () => bridge('scan', { ...page, rendered: action === 'rendered-scan', wcag_review: section.wcagReview, doj_exceptions: section.dojExceptions || [] });
+       const persistScan = async (result: any) => {
+         const update = await Project.updateOne({ projectID: req.params.projectID, a11yReview: { $elemMatch: {
+-          _id: section._id, remedyEvidenceVersion: evidenceVersion === 0 ? { $in: [null, 0] } : evidenceVersion,
++          _id: section._id, remedyWritePending: { $ne: true }, remedyEvidenceVersion: evidenceVersion === 0 ? { $in: [null, 0] } : evidenceVersion,
+         } } }, {
+           $set: { 'a11yReview.$.wcagReview': result.wcag_review || result.wcagReview,
+             'a11yReview.$.dojExceptions': result.doj_exceptions || result.dojExceptions || [],
+@@ -40,28 +60,18 @@ export function createRemediationActionHandler({ Project, WorkItems, bridge = ca
+         });
+         if (update?.acknowledged === false || update?.matchedCount === 0) throw Error('Page changed while scanning. Rescan required.');
+       };
+-      const isWrite = action === 'apply' || action === 'restore';
+-      const invalidate = async () => {
+-        const update = await Project.updateOne({ projectID: req.params.projectID, 'a11yReview._id': section._id }, {
+-          $unset: { 'a11yReview.$.wcagReview.rendered': '', 'a11yReview.$.wcagReview.sourceHash': '' },
+-          $set: { 'a11yReview.$.remedyError': 'Page write requires fresh scan evidence.' },
+-          $inc: { 'a11yReview.$.remedyEvidenceVersion': 1 },
+-        });
+-        if (update?.acknowledged === false || update?.matchedCount === 0) throw Error('Page evidence could not be invalidated.');
+-        evidenceVersion++;
+-      };
+       if (isWrite) {
+         writeOutcome = 'not_started';
+-        // Fail closed before dispatch: a process/client disconnect cannot leave an old approval current.
+-        await invalidate();
++        // Claim and invalidate atomically; scans cannot certify a pending/interrupted write.
++        await invalidate('Page write pending. Fresh scan evidence will be required.', true, true);
+         writeOutcome = 'uncertain';
+       }
+       const result = ['scan', 'rendered-scan'].includes(action) ? await scan() : await bridge(endpoints[action], body);
+       if (isWrite) {
+         writeOutcome = result.applied === false || result.restored === false ? 'not_written'
+           : result.applied === true || result.restored === true ? 'written' : 'uncertain';
+-        await invalidate();
+-        if (writeOutcome === 'uncertain') return res.status(502).json({ err: true, writeOutcome, errMsg: 'Write outcome is unknown. Check the upstream page before any further write; do not retry automatically.' });
++        if (writeOutcome === 'uncertain') return res.status(502).json({ err: true, writeOutcome, errMsg: 'Write outcome is unknown. Reconcile the pending write; do not retry automatically.' });
++        await invalidate('Page write requires fresh scan evidence.', false);
+       }
+       let scanResult = ['scan', 'rendered-scan'].includes(action) ? result : null;
+       let scanError: string | undefined;
+@@ -87,12 +97,15 @@ export function createRemediationActionHandler({ Project, WorkItems, bridge = ca
+       }
+       res.json({ err: false, ...result, page_url: section.sectionURL, scan: scanResult ? { ...scanResult, page_url: section.sectionURL } : null, scanError, evidenceError, writeOutcome });
+     } catch (e: any) {
+-      if (section && ['scan','rendered-scan','apply','restore'].includes(req.params.action)) {
+-        await Project.updateOne({projectID:req.params.projectID,'a11yReview._id':section._id}, {$inc:{'a11yReview.$.remedyEvidenceVersion':1},$unset:{'a11yReview.$.wcagReview.rendered':'','a11yReview.$.wcagReview.sourceHash':''},$set:{'a11yReview.$.remedyError':'Latest page action or scan failed. Rescan required.'}}).catch(()=>{});
++      if (section && ['scan', 'rendered-scan'].includes(action)) {
++        await invalidate('Latest scan failed. Rescan required.').catch(() => {});
++      } else if (section && writeOutcome && writeOutcome !== 'not_started') {
++        // Keep the durable claim on uncertainty or a failed post-write persistence step.
++        await invalidate('Page write requires reconciliation before further actions.', true).catch(() => {});
+       }
+       res.status(e.status || (writeOutcome === 'uncertain' ? 502 : 500)).json({ err: true, writeOutcome, errMsg: writeOutcome === 'uncertain'
+-        ? 'Write outcome is unknown. Check the upstream page before any further write; do not retry automatically.'
+-        : writeOutcome === 'written' ? 'Write completed, but evidence could not be saved. Do not repeat the write; rescan to recover.'
++        ? 'Write outcome is unknown. Reconcile the pending write; do not retry automatically.'
++        : writeOutcome === 'written' ? 'Write completed, but evidence could not be saved. Do not repeat the write; reconcile its evidence state.'
+         : e.publicMessage || 'Page action failed. Refresh and try again.' }); }
+   };
+ }
+diff --git a/server/integration/remedy-routes.test.ts b/server/integration/remedy-routes.test.ts
+index ba6fa62c45ca346483740d9575e870f3ef9187ab..c851fc4c7c43cc43ea3ff4aaf4175d48fc5b50fb 100644
+--- a/server/integration/remedy-routes.test.ts
++++ b/server/integration/remedy-routes.test.ts
+@@ -28,6 +28,7 @@ let calls: { path: string; body: any }[] = [];
+ let outcome = 'written', scanFails = false, changed = false;
+ let observedVerified: number | undefined;
+ let holdScan: (() => Promise<void>) | undefined;
++let holdWrite: (() => Promise<void>) | undefined;
+ function scan() { const at = new Date().toISOString(), sourceHash = changed ? 'new-source' : 'old-source'; return { wcag_review: { sourceHash, scannedAt: at, criteria: criteria.map(c => ({ ...c, status: 'manual_review' })), rendered: { state: 'complete', sourceHash, renderedHash: changed ? 'new-render' : 'old-render', platformHash: 'platform', browser: 'synthetic', axeVersion: '4', scannedAt: at, violations: [] } }, findings: [], scanned_at: at }; }
+ async function listen(server: http.Server) { await new Promise<void>(r => server.listen(0, '127.0.0.1', r)); return `http://127.0.0.1:${(server.address() as any).port}`; }
+ async function request(path: string, method = 'GET', body?: any, user = 'editor') {
+@@ -44,7 +45,7 @@ before(async () => {
+     const body = raw ? JSON.parse(raw) : {};
+     calls.push({ path: req.url!, body });
+     if (req.url?.endsWith('/scan')) { if (scanFails) { res.writeHead(503); return res.end(JSON.stringify({ detail: 'Synthetic scanner offline' })); } const captured = scan(); if (holdScan) { const hold = holdScan; holdScan = undefined; await hold(); } res.setHeader('Content-Type','application/json'); return res.end(JSON.stringify(captured)); }
+-    if (req.url?.endsWith('/apply-fix')) { observedVerified = (await request(base + '/conformance')).data.report.verifiedCriteria; changed = outcome !== 'noop'; if (outcome === 'uncertain') { res.destroy(); return; } res.setHeader('Content-Type','application/json'); return res.end(JSON.stringify({ applied: outcome !== 'noop' })); }
++    if (req.url?.endsWith('/apply-fix')) { observedVerified = (await request(base + '/conformance')).data.report.verifiedCriteria; if (holdWrite) { const hold = holdWrite; holdWrite = undefined; await hold(); } changed = outcome !== 'noop'; if (outcome === 'uncertain') { res.destroy(); return; } res.setHeader('Content-Type','application/json'); return res.end(JSON.stringify({ applied: outcome !== 'noop' })); }
+     res.setHeader('Content-Type','application/json'); res.end(JSON.stringify({ before_html: '<p>before</p>', after_html: '<p>after</p>', preview_hash: 'synthetic-hash', preview_token: 'synthetic-token' }));
+   });
+   process.env.REMEDY_API_BASE_URL = await listen(bridge);
+@@ -159,3 +160,20 @@ test('matrix requires a stored section ID and preserves the existing sandbox res
+   for (const action of ['scan','preview','apply']) assert.equal((await request(`${matrix}/${action}`, 'POST', input())).status, 403);
+   assert.equal(calls.length, 0);
+ });
++
++test('a scan during an outstanding write cannot make the old review current', async () => {
++  let release!: () => void, started!: () => void;
++  const paused = new Promise<void>(r => { release = r; });
++  const entered = new Promise<void>(r => { started = r; });
++  holdWrite = async () => { started(); await paused; };
++  const writing = request(`${matrix}/apply`, 'POST', input());
++  await entered;
++  try {
++    await request(`${base}/page/${sectionID}/rendered-scan`, 'POST', {});
++    const report = (await request(base + '/conformance')).data.report;
++    assert.equal(report.verifiedCriteria, 0, 'pending writes must block approval even after a concurrent scan');
++    const overlapping = await request(`${matrix}/apply`, 'POST', input());
++    assert.equal(overlapping.status, 409);
++    assert.equal(calls.filter(c => c.path.endsWith('/apply-fix')).length, 1);
++  } finally { release(); await writing; }
++});
+diff --git a/server/util/a11yreviewutils.ts b/server/util/a11yreviewutils.ts
+index 95d90fb15411ddb6e14554504b24c5bc66717962..56d7e5458c8c98e0b830ad407d44fdd8def1f939 100644
+--- a/server/util/a11yreviewutils.ts
++++ b/server/util/a11yreviewutils.ts
+@@ -46,6 +46,7 @@ export const a11ySectionReviewSchema = {
+     dojExceptions: [Schema.Types.Mixed],
+     remedyStatus: String,
+     remedyEvidenceVersion: Number,
++    remedyWritePending: Boolean,
+     remedyLastScannedAt: Date,
+     remedyFindings: Array,
+     remedyWcagSummary: Object,
+diff --git a/server/util/conformance.ts b/server/util/conformance.ts
+index 1bdc8e142ae32c38c230477c9a092968ab999518..f7b2b2bc068e7849fcb64170b1fc480a3b034337 100644
+--- a/server/util/conformance.ts
++++ b/server/util/conformance.ts
+@@ -4,12 +4,14 @@ export { criteria };
+ export const MAX_EVIDENCE_AGE_MS = 24 * 60 * 60 * 1000;
+ const hash = (x: unknown) => createHash('sha256').update(JSON.stringify(x)).digest('hex');
+ export function pageFingerprint(section: any) {
++  if (section.remedyWritePending) return null;
+   const w = section.wcagReview, r = w?.rendered;
+   if (!w?.sourceHash || r?.sourceHash !== w.sourceHash || !r?.renderedHash || !r?.platformHash) return null;
+   return hash([section.sectionURL,w.sourceHash,r.renderedHash,r.platformHash,r.browser,r.axeVersion]);
+ }
+ export function scanBlockers(section: any, now = Date.now()) {
+   const w = section.wcagReview, r = w?.rendered, blockers: string[] = [];
++  if (section.remedyWritePending) blockers.push('Page write pending or uncertain. Reconciliation is required before new scan evidence can be accepted.');
+   if (!pageFingerprint(section)) blockers.push('Current source and rendered evidence required.');
+   if (r?.state !== 'complete') blockers.push('Rendered-page scan is missing, failed or incomplete.');
+   if (![r?.scannedAt,w?.scannedAt].every(t=> typeof t === 'string' && Number.isFinite(Date.parse(t)) && Date.parse(t) <= now + 60000 && now-Date.parse(t) <= MAX_EVIDENCE_AGE_MS)) blockers.push('Rescan required: evidence is older than 24 hours or missing.');
+-- 
+2.54.0 (Apple Git-157)
+
