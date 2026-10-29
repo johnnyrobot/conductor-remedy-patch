@@ -4,9 +4,9 @@
   "role": "secondary-released-floor",
   "upstreamRepository": "https://github.com/LibreTexts/conductor.git",
   "baseCommit": "352a657ec6de7b317a70ad3f8f744bc6d5054d9d",
-  "expectedTree": "2a10004048306b9f0fd28f093e0fcb9bef78bbc1",
+  "expectedTree": "24b1a1bf096baa1759cc8745b4a30547e0d4ac1c",
   "upstreamPackageVersion": "2.156.2",
-  "sourceCommit": "31883230f778d337075852b27ea6ab219037a5f2",
+  "sourceCommit": "2672297b3a966260a5fd9e69d749d577de683b5e",
   "patches": [
     {
       "path": "patches/0001-feat-a11y-carry-CXone-pageID-on-review-sections-extr.patch",
@@ -86,7 +86,7 @@
     },
     {
       "path": "patches/0020-feat-a11y-bind-signed-operations-to-stored-reviewed-.patch",
-      "sha256": "b6dd867cd9c044035980e854351e007d6a586ffa68fe9b3295ae6a6e2dfdc924"
+      "sha256": "98f3aa048a5075cdcae9ed59342d8a245c462c31771c524db1b5620150706f39"
     }
   ],
   "upstreamScripts": {

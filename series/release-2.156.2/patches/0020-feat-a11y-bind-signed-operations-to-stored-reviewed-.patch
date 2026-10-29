@@ -1,18 +1,19 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: johnnyrobot <174211481+johnnyrobot@users.noreply.github.com>
-Date: Thu, 29 Oct 2026 05:34:11 -0700
+Date: Thu, 29 Oct 2026 05:49:09 -0700
 Subject: [PATCH] feat(a11y): bind signed operations to stored reviewed
  evidence
 
 LT-140 / LT-127: Native Node22 assertions, atomic issuer/jti intents, strict evidence outcomes, stale-source invalidation and scoped read-only recovery without mutation retry or administrative unlock.
 ---
  .../projects/ConformanceReview.test.tsx       |  27 +-
- .../ProjectAccessibility.capability.test.jsx  |  62 +++-
- .../projects/ProjectAccessibility.jsx         |  26 +-
+ .../ProjectAccessibility.capability.test.jsx  |  97 ++++-
+ .../projects/ProjectAccessibility.jsx         |  28 +-
  .../projects/ProjectAccessibility.test.jsx    |  21 ++
  .../projects/RemediationPageActions.test.ts   |  34 +-
  .../projects/RemediationPageActions.tsx       |  36 +-
- .../projects/RemediationWorkQueue.tsx         |   2 +-
+ .../projects/RemediationWorkQueue.test.tsx    |  23 ++
+ .../projects/RemediationWorkQueue.tsx         |  16 +-
  .../projects/RemedyOperationStatus.test.tsx   |  49 +++
  .../projects/RemedyOperationStatus.tsx        |  22 ++
  .../src/components/projects/remedyOutcome.ts  |  14 +
@@ -29,7 +30,8 @@ LT-140 / LT-127: Native Node22 assertions, atomic issuer/jti intents, strict evi
  server/util/remediationactions.test.ts        | 114 +++---
  server/util/remedyReview.test.ts              |  37 ++
  server/util/remedyReview.ts                   | 116 ++++++
- 23 files changed, 1243 insertions(+), 175 deletions(-)
+ 24 files changed, 1315 insertions(+), 177 deletions(-)
+ create mode 100644 client/src/components/projects/RemediationWorkQueue.test.tsx
  create mode 100644 client/src/components/projects/RemedyOperationStatus.test.tsx
  create mode 100644 client/src/components/projects/RemedyOperationStatus.tsx
  create mode 100644 client/src/components/projects/remedyOutcome.ts
@@ -98,7 +100,7 @@ index ef9bcfc5..ba77d917 100644
 +  expect(fixture.submissions).toEqual([]);
 +});
 diff --git a/client/src/components/projects/ProjectAccessibility.capability.test.jsx b/client/src/components/projects/ProjectAccessibility.capability.test.jsx
-index 2158a049..156809f6 100644
+index 2158a049..bfc20134 100644
 --- a/client/src/components/projects/ProjectAccessibility.capability.test.jsx
 +++ b/client/src/components/projects/ProjectAccessibility.capability.test.jsx
 @@ -3,12 +3,14 @@ import { createRoot } from 'react-dom/client';
@@ -117,7 +119,7 @@ index 2158a049..156809f6 100644
  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
  
  test('mounted project page follows server capability and leaves ordinary matrix controls usable', async () => {
-@@ -30,3 +32,61 @@ test('mounted project page follows server capability and leaves ordinary matrix
+@@ -30,3 +32,96 @@ test('mounted project page follows server capability and leaves ordinary matrix
      expect(axios.get).toHaveBeenCalledWith('/project/accessibility/remedy/health', { params: { projectID: 'fixture01' } });
    } finally { await act(async () => root.unmount()); container.remove(); }
  });
@@ -179,8 +181,43 @@ index 2158a049..156809f6 100644
 +    }
 +  } finally { await act(async () => root.unmount()); container.remove(); }
 +});
++
++test('mounted project keeps scoped recovery readable when local signing is unavailable', async () => {
++  axios.get.mockReset(); axios.post.mockReset(); axios.put.mockReset();
++  const project = { projectID: 'fixture01', title: 'Fixture project', members: ['editor'], leads: [], liaisons: [], auditors: [], tags: [] };
++  axios.get.mockImplementation(async path => ({ data: path === '/project' ? { err: false, project }
++    : path.includes('remedy/health') ? { err: false, available: false, state: 'degraded', message: 'Reviewed writes are unavailable.', capabilities: { scan: true, preview: true, mutate: false, operation_status: true } }
++    : { err: false, a11yReview: [] } }));
++  const fetcher = vi.fn(async path => ({ ok: true, json: async () => path.includes('/operations/')
++    ? { err: false, operation: { outcome: 'known_success' }, pending: true }
++    : { err: false, canEdit: true, users: [], candidates: [], items: [], sections: [
++      { id: 'pending-page', title: 'Pending article', pendingOperationID: 'saved-operation' },
++      { id: 'ordinary-page', title: 'Ordinary article' },
++    ] } }));
++  vi.stubGlobal('fetch', fetcher);
++  const container = document.createElement('div'); document.body.appendChild(container); const root = createRoot(container);
++  try {
++    await act(async () => root.render(<MemoryRouter><ProjectAccessibility match={{ params: { id: 'fixture01' } }} location={{ search: '' }} /></MemoryRouter>));
++    const read = await screen.findByRole('button', { name: 'Read operation evidence' });
++    expect(container.textContent).toContain('Pending article');
++    expect(container.textContent).not.toContain('Ordinary article');
++    expect(screen.queryByLabelText('Page tools')).toBeNull();
++    expect(screen.queryByRole('button', { name: 'Rescan page' })).toBeNull();
++    expect(screen.queryByRole('button', { name: 'Fix and rescan task' })).toBeNull();
++    expect(screen.queryByText('Edit work item')).toBeNull();
++    expect(container.querySelector('.conformance-review')).toBeNull();
++    expect([...container.querySelectorAll('button')].find(b => b.textContent.includes('Scan with Remedy'))).toBeDisabled();
++    expect(fetcher).toHaveBeenCalledTimes(1);
++    expect(fetcher.mock.calls.some(([path]) => path.includes('/operations/'))).toBe(false);
++    await act(async () => fireEvent.click(read));
++    await screen.findByText(/Write confirmed.*page remains blocked/);
++    expect(fetcher).toHaveBeenCalledTimes(2);
++    expect(fetcher.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true);
++    expect(axios.post).not.toHaveBeenCalled();
++  } finally { await act(async () => root.unmount()); container.remove(); }
++});
 diff --git a/client/src/components/projects/ProjectAccessibility.jsx b/client/src/components/projects/ProjectAccessibility.jsx
-index 0d9f3eb6..aeca7e2a 100644
+index 0d9f3eb6..ada888ad 100644
 --- a/client/src/components/projects/ProjectAccessibility.jsx
 +++ b/client/src/components/projects/ProjectAccessibility.jsx
 @@ -19,6 +19,9 @@ import {
@@ -209,7 +246,15 @@ index 0d9f3eb6..aeca7e2a 100644
              {applyResult.scanError && <p role='alert'>{applyResult.scanError}</p>}
              {applyResult.revision_summary && <p><strong>Revision:</strong> {applyResult.revision_summary}</p>}
              {applyResult.snapshot_path && <p><strong>Snapshot:</strong> {applyResult.snapshot_path}</p>}
-@@ -567,6 +570,9 @@ const ProjectAccessibility = (props) => {
+@@ -548,6 +551,7 @@ const ProjectAccessibility = (props) => {
+     const [remedyCapability, setRemedyCapability] = useState({ available: false, message: 'Checking Remedy availability.' });
+     const [capabilityCheck, setCapabilityCheck] = useState(0);
+     const remedyAvailable = remedyCapability.projectID === props.match.params.id && remedyCapability.available === true;
++    const remedyRecoveryAvailable = remedyCapability.projectID === props.match.params.id && remedyCapability.capabilities?.operation_status === true;
+     const [showScanModal, setShowScanModal] = useState(false);
+     const [scanLoading, setScanLoading] = useState(false);
+     const [scanProgress, setScanProgress] = useState({ total: 0, completed: 0, currentTitle: '' });
+@@ -567,6 +571,9 @@ const ProjectAccessibility = (props) => {
      const [applyLoading, setApplyLoading] = useState(false);
      const [applyResult, setApplyResult] = useState(null);
      const [fixReviewed, setFixReviewed] = useState(false);
@@ -219,7 +264,7 @@ index 0d9f3eb6..aeca7e2a 100644
      const reviewSectionsRef = React.useRef([]);
      const legacyCriteriaUpdatesRef = React.useRef({});
      const lastPersistedA11yProgressRef = React.useRef(0);
-@@ -1242,6 +1248,7 @@ const ProjectAccessibility = (props) => {
+@@ -1242,6 +1249,7 @@ const ProjectAccessibility = (props) => {
              blocked,
          } = await refreshFixableFindingsForSection(section);
          setActiveFixSection(refreshedSection);
@@ -227,7 +272,7 @@ index 0d9f3eb6..aeca7e2a 100644
          setSelectedFindingIDs(fixableFindings.map((finding) => finding.id));
          setRemedyFixMode('deterministic');
          setPipelineTier(1);
-@@ -1307,6 +1314,7 @@ const ProjectAccessibility = (props) => {
+@@ -1307,6 +1315,7 @@ const ProjectAccessibility = (props) => {
                  throw (new Error(res.data.errMsg));
              }
              setPreviewData(res.data);
@@ -235,7 +280,7 @@ index 0d9f3eb6..aeca7e2a 100644
          } catch (err) {
              handleGlobalError(err);
          } finally {
-@@ -1333,12 +1341,14 @@ const ProjectAccessibility = (props) => {
+@@ -1333,12 +1342,14 @@ const ProjectAccessibility = (props) => {
                  findingIDs,
                  previewHash: previewData.preview_hash,
                  previewToken: previewData.preview_token || previewData.previewToken,
@@ -250,7 +295,7 @@ index 0d9f3eb6..aeca7e2a 100644
              setApplyResult(res.data);
              setPreviewData(null);
              if (res.data.scan) setRemedyFindingsBySection(prev => ({ ...prev, [activeFixSection._id]: res.data.scan.findings || [] }));
-@@ -1346,6 +1356,7 @@ const ProjectAccessibility = (props) => {
+@@ -1346,6 +1357,7 @@ const ProjectAccessibility = (props) => {
              await getReviewSections({ persistScore: true });
          } catch (err) {
              setPreviewData(null);
@@ -258,7 +303,7 @@ index 0d9f3eb6..aeca7e2a 100644
              await getReviewSections({ persistScore: true }).catch(() => {});
              handleGlobalError(err);
          } finally {
-@@ -1409,7 +1420,8 @@ const ProjectAccessibility = (props) => {
+@@ -1409,7 +1421,8 @@ const ProjectAccessibility = (props) => {
      const canRunRemedyFixActions = remedyAvailable && activeFixSection && !fixActionsBlocked;
      const canPreviewRemedyFix = canRunRemedyFixActions && (isPipelineFixMode || selectedFindingIDs.length > 0);
      const canApplyRemedyFix = canRunRemedyFixActions
@@ -268,7 +313,15 @@ index 0d9f3eb6..aeca7e2a 100644
          && !previewData.noise_only_change
          && fixReviewed
          && !applyResult
-@@ -2082,12 +2094,16 @@ const ProjectAccessibility = (props) => {
+@@ -1574,6 +1587,7 @@ const ProjectAccessibility = (props) => {
+                                                 <ConformanceReview projectID={props.match.params.id} sections={reviewSections} onScanSaved={() => getReviewSections({ persistScore: true })} />
+                                                 <RemediationWorkQueue projectID={props.match.params.id} onScanSaved={() => getReviewSections({ persistScore: true })} />
+                                             </>}
++                                            {!remedyAvailable && remedyRecoveryAvailable && <RemediationWorkQueue projectID={props.match.params.id} recoveryOnly />}
+                                             <WcagReviewTable
+                                                 sections={reviewSections}
+                                                 getSectionFixableIssueCount={getSectionFixableIssueCount}
+@@ -2082,12 +2096,16 @@ const ProjectAccessibility = (props) => {
                                      {previewData && !applyResult && (
                                          <Form.Checkbox
                                              className='mt-1p'
@@ -462,11 +515,46 @@ index 91eab4d1..0db01733 100644
      </div>}
    </section>;
  }
+diff --git a/client/src/components/projects/RemediationWorkQueue.test.tsx b/client/src/components/projects/RemediationWorkQueue.test.tsx
+new file mode 100644
+index 00000000..66d4c198
+--- /dev/null
++++ b/client/src/components/projects/RemediationWorkQueue.test.tsx
+@@ -0,0 +1,23 @@
++import React from 'react';
++import { render, screen, fireEvent, cleanup } from '@testing-library/react';
++import { afterEach, expect, test, vi } from 'vitest';
++import RemediationWorkQueue from './RemediationWorkQueue';
++
++afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
++
++test('task tools retain the current section pending operation and can read it without a blocked POST', async () => {
++  const fetcher = vi.fn(async (url: string, _init?: RequestInit) => ({ ok: true, json: async () => url.includes('/operations/')
++    ? { err: false, operation: { outcome: 'known_success' }, pending: true }
++    : { err: false, canEdit: true, users: [], candidates: [], sections: [{ id: 'page1', title: 'Current page', pendingOperationID: 'saved-operation' }],
++      items: [{ _id: 'task1', key: 'task-key', sectionID: 'page1', sectionTitle: 'Task page', title: 'Review image', status: 'blocked', priority: 'normal', history: [], version: 0 }] } }));
++  vi.stubGlobal('fetch', fetcher);
++  render(<RemediationWorkQueue projectID="project123" />);
++  fireEvent.click(await screen.findByRole('button', { name: 'Fix and rescan task' }));
++  const read = await screen.findByRole('button', { name: 'Read operation evidence' });
++  expect(fetcher).toHaveBeenCalledTimes(1);
++  fireEvent.click(read);
++  await screen.findByText(/Write confirmed.*page remains blocked/);
++  expect(fetcher).toHaveBeenCalledTimes(2);
++  expect(fetcher.mock.calls[1][0]).toBe('/api/v1/project/project123/accessibility/workqueue/page/page1/operations/saved-operation');
++  expect(fetcher.mock.calls.every(([, init]) => init?.method === 'GET')).toBe(true);
++});
 diff --git a/client/src/components/projects/RemediationWorkQueue.tsx b/client/src/components/projects/RemediationWorkQueue.tsx
-index 4f4dfecd..42745d4a 100644
+index 4f4dfecd..b436001c 100644
 --- a/client/src/components/projects/RemediationWorkQueue.tsx
 +++ b/client/src/components/projects/RemediationWorkQueue.tsx
-@@ -10,7 +10,7 @@ async function request(path: string, method = 'GET', body?: unknown) {
+@@ -1,4 +1,5 @@
+ import RemediationPageActions from './RemediationPageActions';
++import RemedyOperationStatus from './RemedyOperationStatus';
+ import React, { useEffect, useRef, useState } from 'react';
+ 
+ const statuses = { todo: 'To do', in_progress: 'In progress', needs_review: 'Needs review', verified: 'Verified', blocked: 'Blocked' };
+@@ -10,7 +11,7 @@ async function request(path: string, method = 'GET', body?: unknown) {
      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
      ...(body ? { body: JSON.stringify(body) } : {}) });
    const data = await res.json();
@@ -475,6 +563,40 @@ index 4f4dfecd..42745d4a 100644
    return data;
  }
  
+@@ -31,7 +32,7 @@ function EditItem({ item, users, save, busy }: any) {
+   </form>;
+ }
+ 
+-export default function RemediationWorkQueue({ projectID, onScanSaved }: { projectID: string; onScanSaved?: () => void }) {
++export default function RemediationWorkQueue({ projectID, onScanSaved, recoveryOnly = false }: { projectID: string; onScanSaved?: () => void; recoveryOnly?: boolean }) {
+   const [data, setData] = useState<any>({ items: [], users: [], sections: [], candidates: [] });
+   const [sectionID, setSectionID] = useState('');
+   const [chosen, setChosen] = useState<string[]>([]);
+@@ -61,6 +62,15 @@ export default function RemediationWorkQueue({ projectID, onScanSaved }: { proje
+   const users = new Map(data.users.map((u: any) => [u.uuid, `${u.firstName} ${u.lastName}`]));
+   const existing = new Set(data.items.map((i: any) => i.key));
+   const items = data.items.filter((i: any) => filter === 'all' || (filter === 'open' ? i.status !== 'verified' : i.status === filter));
++  if (recoveryOnly) return <section className="ui segment remediation-work-queue" aria-label="Pending write recovery">
++    <h2>Pending write recovery</h2>
++    <p>Reviewed writes are unavailable. Saved operation evidence remains read-only; reading it does not unlock a page or repeat a write.</p>
++    {error && <div role="alert" className="ui negative message">{error}</div>}
++    {data.canEdit && data.sections.filter((section: any) => section.pendingOperationID).map((section: any) => <div key={`${section.id}-${section.pendingOperationID}`}>
++      <h3>{section.title}</h3>
++      <RemedyOperationStatus base={base} sectionID={section.id} localOperationID={section.pendingOperationID} request={request} />
++    </div>)}
++  </section>;
+   return <section className="ui segment remediation-work-queue" aria-label="Remediation work queue">
+     <style>{`.remediation-work-queue{margin:1.5rem 0!important}.remediation-work-queue h2{margin-top:0}.remediation-work-queue select,.remediation-work-queue textarea{display:block;padding:.55rem;border:1px solid #999;border-radius:4px;background:white;color:#222;max-width:100%;width:100%}.remediation-work-queue label{display:block;font-weight:600}.remediation-work-queue textarea{margin:.4rem 0}.rq-fields{display:flex;gap:1rem;flex-wrap:wrap;margin:1rem 0}.rq-fields label{flex:1;min-width:160px}.rq-candidates{max-height:260px;overflow:auto;margin:1rem 0;padding:.5rem;border:1px solid #ccc}.rq-candidates label{padding:.5rem;font-weight:normal}.rq-candidates input{margin-right:.6rem}.rq-table{overflow:auto}.rq-table table{min-width:640px}.rq-table td{vertical-align:top}.rq-table summary{cursor:pointer;font-weight:600;margin:.5rem 0}.rq-evidence{white-space:pre-wrap;overflow-wrap:anywhere;max-height:150px;overflow:auto}.rq-history{padding-left:1.3rem}.rq-history li{margin:.6rem 0}.remediation-work-queue :focus-visible{outline:3px solid #1565c0;outline-offset:2px}`}</style>
+     <h2>Remediation work queue</h2>
+@@ -78,7 +88,7 @@ export default function RemediationWorkQueue({ projectID, onScanSaved }: { proje
+     </details>}
+     <div className="rq-fields"><label>Show<select value={filter} onChange={e => setFilter(e.target.value)}><option value="open">All open items</option><option value="all">All items</option>{Object.entries(statuses).map(([v, title]) => <option key={v} value={v}>{title}</option>)}</select></label><div><button type="button" className="ui button" disabled={busy} onClick={() => act(() => Promise.resolve(), () => 'Queue refreshed.')}>Refresh queue</button></div></div>
+     {!items.length ? <p>No work items in this view.</p> : <div className="rq-table"><table className="ui celled table"><thead><tr><th>Page and finding</th><th>Assignment</th><th>Progress and review</th></tr></thead><tbody>{items.map((item: any) => <tr key={item._id}>
+-      <td><strong>{item.sectionTitle}</strong>{data.canEdit && <p><button type="button" className="ui button" onClick={() => setActivePage({ section: { id: item.sectionID, title: item.sectionTitle }, item })}>Fix and rescan task</button></p>}<p>{item.criterionID} · {item.title}</p>{/^https:\/\//.test(item.sectionURL) && <a href={item.sectionURL} target="_blank" rel="noopener noreferrer">Open source page</a>}<details><summary>Original scan evidence</summary><p>{item.ruleId} {item.selector}</p><pre className="rq-evidence">{item.evidence}</pre><p>Captured: {item.scannedAt ? new Date(item.scannedAt).toLocaleString() : 'Not recorded'}. Evidence may change after a rescan; verification is explicit.</p></details></td>
++      <td><strong>{item.sectionTitle}</strong>{data.canEdit && <p><button type="button" className="ui button" onClick={() => setActivePage({ section: data.sections.find((section: any) => section.id === item.sectionID) || { id: item.sectionID, title: item.sectionTitle }, item })}>Fix and rescan task</button></p>}<p>{item.criterionID} · {item.title}</p>{/^https:\/\//.test(item.sectionURL) && <a href={item.sectionURL} target="_blank" rel="noopener noreferrer">Open source page</a>}<details><summary>Original scan evidence</summary><p>{item.ruleId} {item.selector}</p><pre className="rq-evidence">{item.evidence}</pre><p>Captured: {item.scannedAt ? new Date(item.scannedAt).toLocaleString() : 'Not recorded'}. Evidence may change after a rescan; verification is explicit.</p></details></td>
+       <td>{String(users.get(item.assignee) || (item.assignee ? 'Former team member' : 'Unassigned'))}<p>Priority: {item.priority}</p></td>
+       <td><strong>{label(item.status)}</strong>{!!item.scanEvidence?.length && <details><summary>Scan evidence ({item.scanEvidence.length})</summary><ol className="rq-history">{item.scanEvidence.map((e: any, n: number) => <li key={n}><strong>{e.action}</strong> · {new Date(e.at).toLocaleString()}<p>Criterion result: {e.criterion?.status || 'Not available'}. Matching findings: {e.findings?.length ?? 'Not available'}.</p>{e.scanError && <p>{e.scanError}</p>}<details><summary>Evidence details</summary><pre className="rq-evidence">{JSON.stringify(e, null, 2)}</pre></details></li>)}</ol></details>}<details><summary>History ({item.history.length})</summary><ol className="rq-history">{item.history.map((h: any, n: number) => <li key={n}>{new Date(h.at).toLocaleString()} · {String(users.get(h.actor) || h.actor)} · {label(h.status)}<p>{h.note}</p></li>)}</ol></details>
+       {data.canEdit && <details key={`${item._id}-${item.version}`}><summary>Edit work item</summary><EditItem item={item} users={data.users} busy={busy} save={(i: any, fields: any) => act(() => request(`${base}/${i._id}`, 'PATCH', { ...fields, version: i.version }), () => 'Work item saved.')} /></details>}</td>
 diff --git a/client/src/components/projects/RemedyOperationStatus.test.tsx b/client/src/components/projects/RemedyOperationStatus.test.tsx
 new file mode 100644
 index 00000000..f8bee613

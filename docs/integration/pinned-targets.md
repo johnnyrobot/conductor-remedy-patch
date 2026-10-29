@@ -8,8 +8,8 @@ Atlas tier, cluster topology and orchestrator are unknown.
 
 | Role | Upstream commit | Version context | Delivered tree |
 |---|---|---|---|
-| Primary staging | `67301b35c3784ed73ba1a65011ef5a1d689abca1` | Root package says 2.156.2; Chief assessment reported image label 2.157.0-rc.4 | `31ed8448b9db4ab46d78a6980926af805fcd600f` |
-| Secondary released floor | `352a657ec6de7b317a70ad3f8f744bc6d5054d9d` | v2.156.2 | `2a10004048306b9f0fd28f093e0fcb9bef78bbc1` |
+| Primary staging | `67301b35c3784ed73ba1a65011ef5a1d689abca1` | Root package says 2.156.2; Chief assessment reported image label 2.157.0-rc.4 | `13310416ccc17299cf0943cfa83f1c4871fa8c85` |
+| Secondary released floor | `352a657ec6de7b317a70ad3f8f744bc6d5054d9d` | v2.156.2 | `24b1a1bf096baa1759cc8745b4a30547e0d4ac1c` |
 
 The image label is assessment context, not a pulled/booted image or observation of
 production. Do not use `latest`; approved deployment must pin compatible image

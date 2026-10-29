@@ -37,7 +37,8 @@ patches and historical evidence are unchanged. Production readiness remains fals
   support/superadmin policy. It uses the saved issuer/jti mapping and exposes only
   safe durable metadata. It never mutates local history, releases a pending claim,
   repairs audits, rescans or retries a write. Administrative resolution remains
-  separate under LT-127.
+  separate under LT-127. Pending recovery remains visible when local signing is
+  unavailable; task-row remounts preserve the saved operation identity.
 
 See delivered `docs/remediation-integration.md` for signer configuration names,
 key-window requirements, immutable protocol provenance, collection/index policy,
@@ -55,7 +56,7 @@ no dependency or lockfile change was introduced.
 |---|---:|---:|
 | Actual registered router, bcrypt login, JWT/current Session, Mongo |49pass|49pass|
 | Server unit |60pass|30pass|
-| Client unit, including mounted real panels |287pass|194pass|
+| Client unit, including mounted real panels |289pass|196pass|
 | Client/server build |pass/pass|pass/pass|
 | Built production-mode Conductor `/health`, optional Remedy disabled |200|200|
 | Full standalone server typecheck |60baseline errors|60baseline errors|
@@ -114,14 +115,28 @@ Executed evidence includes:
    a fresh exact signed write passed, and a source changed BEFORE a no-op preview
    invalidated old evidence and kept it invalid with zero external writes.
 
+7. Disabling local signing material makes mutation unavailable while real scoped
+   status still succeeds, retaining pending state and unchanged history. Scan and
+   preview remain usable; a confirmed write receives503 before intent/dispatch
+   with zero external writes. Mounted UI regressions prove the corresponding
+   recovery-only view and immediate task-row remount lookup.
+
 Initial and extended flow observations remain under the private local
 `/tmp/conductor-lt140-fullstack-20261029` fixture; detailed component logs remain
 under `/tmp/conductor-lt140-evidence`. An initial no-op harness request selected
 the matrix endpoint with empty finding IDs and correctly received400; the corrected
 queue-route harness passed. A fixture TypeScript startup initially lacked ESM
 configuration; adding its private package type fixed the harness. These were setup
-corrections, not hidden product failures. Raw credentials/assertions are not part
-of this report or repository.
+corrections, not hidden product failures. The first native review found two
+recovery UI gaps (task-row pending identity and unavailable-signer recovery);
+mounted regressions reproduced both and pass after correction. Raw
+credentials/assertions are not part of this report or repository.
+
+Fixture cleanup invalidated7sessions, cleared3password hashes, dropped only its
+disposable database, gracefully stopped Conductor/Server/Bridge and the transport
+fixture, cleared synthetic credential files and verified no fixture listeners.
+Ledger/fence/snapshot/audit evidence was retained; no administrative resolution
+or claim unlock was performed.
 
 ## Release limits
 
