@@ -4,9 +4,9 @@
   "role": "primary",
   "upstreamRepository": "https://github.com/LibreTexts/conductor.git",
   "baseCommit": "67301b35c3784ed73ba1a65011ef5a1d689abca1",
-  "expectedTree": "bec06bcc8e480068d4517396536e82ed68729e86",
+  "expectedTree": "ef76457706e242dade7be7d4d5dae9fb0f22e26f",
   "upstreamPackageVersion": "2.156.2",
-  "sourceCommit": "27c643b7159813c78512b72ec6635e27d1db2067",
+  "sourceCommit": "bc0049bb639c08d21ce797aeb7ec84032d476689",
   "patches": [
     {
       "path": "patches/0001-feat-a11y-carry-CXone-pageID-on-review-sections-extr.patch",
@@ -91,6 +91,10 @@
     {
       "path": "patches/0021-perf-a11y-index-current-conformance-review-selection.patch",
       "sha256": "3795dceaddf2d275657c93ba4594cdf6bbf183430f7c5b0c223fc863e7ac7d72"
+    },
+    {
+      "path": "patches/0022-feat-a11y-bound-reads-and-externalize-immutable-oper.patch",
+      "sha256": "2c4317ed5757a0fe2ab37611e02f1a5685e3fd68065bb150cf1db72b3d549293"
     }
   ],
   "upstreamScripts": {
@@ -127,12 +131,30 @@
     "node": "22.20.0",
     "npm": "10.9.3",
     "os": "macOS arm64",
-    "mongo": "8.0.5 isolated loopback"
+    "mongo": "7.0.14 isolated loopback standalone"
   },
   "productionVersionObserved": false,
   "dockerImageBootVerified": false,
   "tenantOptInEnforcementImplemented": true,
   "deploymentReady": false,
   "signedReviewerOperationsImplemented": true,
-  "readOnlyOperationLookupImplemented": true
+  "readOnlyOperationLookupImplemented": true,
+  "storage": {
+    "operationHistory": "remedyoperationrecords immutable write-ahead events",
+    "activePointers": "projects.a11yReview.remedyPendingOperation",
+    "legacyHistory": "projects.remedyOperations retained read-only; no startup backfill",
+    "collections": [
+      "projects",
+      "remediationworkitems",
+      "conformancerecords",
+      "remedyoperationrecords"
+    ],
+    "writeAcknowledgement": "majority with journaling; standalone tested, no transaction prerequisite",
+    "readLimitDefault": 100,
+    "readLimitMaximum": 200,
+    "exportDeadlineSeconds": 120,
+    "workItemEventLimitPerArray": 1000,
+    "workItemAppendThresholdBytes": 8388608,
+    "newEventMaximumBytes": 65536
+  }
 }

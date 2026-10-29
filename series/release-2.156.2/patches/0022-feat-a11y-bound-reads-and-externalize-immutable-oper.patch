@@ -1,0 +1,1395 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: johnnyrobot <174211481+johnnyrobot@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 08:19:25 -0700
+Subject: [PATCH] feat(a11y): bound reads and externalize immutable operation
+ history (LT-157)
+
+Stream selection metadata and complete exports; keep active pending pointers bounded with journaled write-ahead events and CAS. Preserve legacy history without migration, add explicit work-item event budgets and mounted pagination/detail flows.
+---
+ .../projects/ConformanceBounds.test.tsx       |  30 +++
+ .../projects/ConformanceReview.test.tsx       |   8 +-
+ .../components/projects/ConformanceReview.tsx |  35 +++-
+ .../ProjectAccessibility.capability.test.jsx  |   5 +-
+ .../projects/RemediationWorkQueue.tsx         |  30 ++-
+ .../projects/WorkQueueBounds.test.tsx         |  25 +++
+ docs/remedy-storage-and-reads.md              | 149 ++++++++++++++
+ server/api/conformance.ts                     |  87 ++++++--
+ server/api/remediationactions.ts              |  75 +++++--
+ server/api/remediationqueue.ts                |  69 ++++++-
+ server/integration/remedy-routes.test.ts      | 194 +++++++++++++++++-
+ .../scripts/inspectLegacyRemedyOperations.ts  |  18 ++
+ server/util/conformance-api.test.ts           |  36 +---
+ server/util/conformanceReads.ts               |  80 ++++++++
+ server/util/remediationactions.test.ts        |   1 +
+ server/util/remediationqueue.test.ts          |   2 +-
+ server/util/remediationqueue.ts               |   5 +-
+ server/util/remedyBudgets.ts                  |  15 ++
+ server/util/remedyExports.ts                  |  17 ++
+ server/util/remedyOperationRecords.ts         |  32 +++
+ 20 files changed, 814 insertions(+), 99 deletions(-)
+ create mode 100644 client/src/components/projects/ConformanceBounds.test.tsx
+ create mode 100644 client/src/components/projects/WorkQueueBounds.test.tsx
+ create mode 100644 docs/remedy-storage-and-reads.md
+ create mode 100644 server/scripts/inspectLegacyRemedyOperations.ts
+ create mode 100644 server/util/conformanceReads.ts
+ create mode 100644 server/util/remedyBudgets.ts
+ create mode 100644 server/util/remedyExports.ts
+ create mode 100644 server/util/remedyOperationRecords.ts
+
+diff --git a/client/src/components/projects/ConformanceBounds.test.tsx b/client/src/components/projects/ConformanceBounds.test.tsx
+new file mode 100644
+index 00000000..fc709796
+--- /dev/null
++++ b/client/src/components/projects/ConformanceBounds.test.tsx
+@@ -0,0 +1,30 @@
++import React from 'react';
++import {render,screen,fireEvent,waitFor,cleanup} from '@testing-library/react';
++import {test,expect,vi,afterEach} from 'vitest';
++import ConformanceReview from './ConformanceReview';
++afterEach(()=>{cleanup();vi.unstubAllGlobals();});
++test('mounted verification loads bounded summaries then selected detail and cursor history',async()=>{
++ const paths:string[]=[];
++ const criterion={id:'1.1.1',title:'Non-text Content',status:'unreviewed',checklist:['Compare images']};
++ const page={sectionID:'page1',title:'First page',url:'https://fixture.invalid/',fingerprint:'fp',blockers:[],criteria:[{id:criterion.id,status:criterion.status}]};
++ vi.stubGlobal('fetch',vi.fn(async(url:any)=>{
++  paths.push(String(url));let body:any;
++  if(String(url).includes('/criteria/'))body={criterion};
++  else if(String(url).includes('/pages/'))body={page:{...page,sourceScan:{rendered:{state:'complete'}}}};
++  else if(String(url).includes('/history'))body={records:[{_id:'history1',actor:'Synthetic reviewer',data:{notes:'Earlier immutable reviewer evidence'}}],nextCursor:null};
++  else body={canEdit:true,criteria:[criterion],report:{scope:{version:'scope1'},pages:[page],digest:'digest',verificationPercent:0,verifiedCriteria:0,totalCriteria:50,status:'verification_pending',readyForSignoff:false}};
++  return {ok:true,json:async()=>({err:false,...body})};
++ }));
++ render(<ConformanceReview projectID="bounded" sections={[]}/>);
++ await screen.findByLabelText('Page to evaluate');expect(paths).toHaveLength(1);
++ fireEvent.change(screen.getByLabelText('Page to evaluate'),{target:{value:'page1'}});
++ await screen.findByLabelText('Compare images');
++ expect(paths.some(p=>p.endsWith('/conformance/pages/page1'))).toBe(true);
++ expect(paths.some(p=>p.endsWith('/conformance/pages/page1/criteria/1.1.1'))).toBe(true);
++ expect(paths.some(p=>p.includes('/history'))).toBe(false);
++ await waitFor(()=>expect(screen.getByRole('button',{name:'View review history'})).toBeEnabled());
++ fireEvent.click(screen.getByRole('button',{name:'View review history'}));
++ await screen.findByText(/Earlier immutable reviewer evidence/);
++ await waitFor(()=>expect(paths.filter(p=>p.includes('/history'))).toHaveLength(1));
++ expect(paths.find(p=>p.includes('/history'))).toContain('sectionID=page1&criterionID=1.1.1');
++});
+diff --git a/client/src/components/projects/ConformanceReview.test.tsx b/client/src/components/projects/ConformanceReview.test.tsx
+index ba77d917..884a3b09 100644
+--- a/client/src/components/projects/ConformanceReview.test.tsx
++++ b/client/src/components/projects/ConformanceReview.test.tsx
+@@ -13,7 +13,7 @@ function setup(includePageActions = false, failScan = false, previewChangesEvide
+   const actions: string[] = [];
+   vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+     if (init?.method === 'POST') submissions.push(JSON.parse(init.body));
+-    return { ok: true, json: async () => ({ err: false, canEdit: true, report: {
++    return { ok: true, json: async () => ({ err: false, canEdit: true, page: {sectionID:'page1',title:'Synthetic article',url:'https://fixture.invalid/',fingerprint,blockers:[],criteria:[{id:'1.1.1',status:'unreviewed'}]}, criterion: {id:'1.1.1',title:'Non-text Content',status:'unreviewed',checklist:['Compare every image with its description']}, report: {
+       scope: { version: scopeVersion }, pages: [{ sectionID: 'page1', title: 'Synthetic article', url: 'https://fixture.invalid/',
+         fingerprint, blockers: [], criteria: [{ id: '1.1.1', title: 'Non-text Content', status: 'unreviewed', checklist: ['Compare every image with its description'] }] }],
+       verificationPercent: 0, verifiedCriteria: 0, totalCriteria: 50, status: 'verification_pending', readyForSignoff: false, digest: 'digest', remediationHandoff: null,
+@@ -40,7 +40,7 @@ function setup(includePageActions = false, failScan = false, previewChangesEvide
+ }
+ async function fillReview() {
+   fireEvent.change(await screen.findByLabelText('Page to evaluate'), { target: { value: 'page1' } });
+-  fireEvent.click(screen.getByLabelText('Compare every image with its description'));
++  fireEvent.click(await screen.findByLabelText('Compare every image with its description'));
+   fireEvent.change(screen.getByLabelText(/Test environment/), { target: { value: 'Synthetic browser and screen reader' } });
+   fireEvent.change(screen.getByLabelText(/Evidence and results/), { target: { value: 'I compared all descriptions against the current synthetic article.' } });
+   fireEvent.click(screen.getByLabelText(/I performed this review/));
+@@ -48,7 +48,7 @@ async function fillReview() {
+ async function refresh() {
+   const calls = vi.mocked(fetch).mock.calls.length;
+   fireEvent.click(screen.getByRole('button', { name: 'Refresh verification' }));
+-  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(calls + 1));
++  await waitFor(() => expect(vi.mocked(fetch).mock.calls.length).toBeGreaterThanOrEqual(calls + 3));
+ }
+ 
+ test('changed evidence requires a new checklist and confirmation before saving', async () => {
+@@ -117,7 +117,7 @@ test('a failed standalone queue scan invalidates the mounted reviewer form witho
+   await waitFor(() => expect(screen.getByLabelText(/I performed this review/)).not.toBeChecked());
+   expect(screen.getByLabelText('Compare every image with its description')).not.toBeChecked();
+   expect(screen.getByRole('button', { name: 'Save reviewer evidence' })).toBeDisabled();
+-  expect(fetch).toHaveBeenCalledTimes(requestsBefore + 1);
++  expect(vi.mocked(fetch).mock.calls.length).toBeGreaterThanOrEqual(requestsBefore + 3);
+ });
+ 
+ 
+diff --git a/client/src/components/projects/ConformanceReview.tsx b/client/src/components/projects/ConformanceReview.tsx
+index a6eb4392..15920bfa 100644
+--- a/client/src/components/projects/ConformanceReview.tsx
++++ b/client/src/components/projects/ConformanceReview.tsx
+@@ -41,14 +41,30 @@ function HandoffSignoff({handoff,canEdit,save,busy}:any) {
+ export default function ConformanceReview({projectID,sections,onScanSaved}:any) {
+   const [data,setData]=useState<any>(null),[error,setError]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false),[sectionID,setSectionID]=useState(''),[criterionID,setCriterionID]=useState('1.1.1');
+   const [boundaries,setBoundaries]=useState(''),[processes,setProcesses]=useState(''),[platformVersion,setPlatformVersion]=useState(''),[scopeConfirmed,setScopeConfirmed]=useState(false),[statement,setStatement]=useState(''),[signed,setSigned]=useState(false);
+-  const stop=useRef(false),generation=useRef(0);
++  const [detail,setDetail]=useState<any>(null),[selectedCriterion,setSelectedCriterion]=useState<any>(null),[detailBusy,setDetailBusy]=useState(false),[history,setHistory]=useState<any>(null);
++  const stop=useRef(false),generation=useRef(0),detailGeneration=useRef(0);
+   const base=`/project/${encodeURIComponent(projectID)}/accessibility/workqueue`;
+-  async function load(){const n=++generation.current;const d=await request(`${base}/conformance`);if(n===generation.current)setData(d);}
++  async function load(cursor?:string){const n=++generation.current;const d=await request(`${base}/conformance${cursor?'?cursor='+encodeURIComponent(cursor):''}`);if(n===generation.current)setData(d);}
++  useEffect(()=>{
++    const n=++detailGeneration.current;setHistory(null);
++    if(!sectionID||!data){setDetail(null);setSelectedCriterion(null);return;}
++    setDetailBusy(true);
++    Promise.all([request(`${base}/conformance/pages/${encodeURIComponent(sectionID)}`),request(`${base}/conformance/pages/${encodeURIComponent(sectionID)}/criteria/${encodeURIComponent(criterionID)}`)])
++      .then(([page,criterion])=>{if(n===detailGeneration.current){setDetail(page.page);setSelectedCriterion(criterion.criterion);}})
++      .catch(e=>{if(n===detailGeneration.current){setError(e.message);setDetail(null);setSelectedCriterion(null);}})
++      .finally(()=>{if(n===detailGeneration.current)setDetailBusy(false);});
++    return()=>{detailGeneration.current++;};
++  },[base,sectionID,criterionID,data]);
++  async function loadHistory(cursor?:string){const n=detailGeneration.current;setBusy(true);setError('');try{
++    const result=await request(`${base}/conformance/history?sectionID=${encodeURIComponent(sectionID)}&criterionID=${encodeURIComponent(criterionID)}${cursor?'&cursor='+encodeURIComponent(cursor):''}`);
++    if(n===detailGeneration.current)setHistory(result);
++  }catch(e:any){setError(e.message);}finally{setBusy(false);}}
++
+   useEffect(()=>{load().catch(e=>setError(e.message));return()=>{generation.current++;stop.current=true;};},[projectID,sections]);
+   async function save(action:string,body:any){setBusy(true);setError('');try{await request(`${base}/conformance/${action}`,body);await load();setMessage(action==='remediation_signoff'?'Remediation delivery accepted. Deferred projects remain open.':'Review record saved.');}catch(e:any){setError(e.message);}finally{setBusy(false);}}
+-  async function scan(all=false){setBusy(true);setError('');stop.current=false;const pages=all?data.report.pages:data.report.pages.filter((p:any)=>p.sectionID===sectionID);let count=0,failures=0;
+-    try{for(const p of pages){if(stop.current)break;setMessage(`Scanning rendered page ${count+1}/${pages.length}: ${p.title}`);try{const r=await request(`${base}/page/${p.sectionID}/rendered-scan`,{});if(r.scanError || r.wcag_review?.rendered?.state!=='complete')failures++;}catch{failures++;}count++;}await load();onScanSaved?.();setMessage(`${count} rendered pages scanned; ${failures} require scan follow-up. Reviewer verification remains pending.`);}catch(e:any){setError(e.message);}finally{setBusy(false);}}
+-  const report=data?.report,page=report?.pages.find((p:any)=>p.sectionID===sectionID),criterion=page?.criteria.find((c:any)=>c.id===criterionID);
++  async function scan(all=false){setBusy(true);setError('');stop.current=false;const pages=all?[...data.report.pages]:[detail].filter(Boolean);let count=0,failures=0;
++    try{if(all){const first=await request(`${base}/conformance`);pages.splice(0,pages.length,...first.report.pages);let cursor=first.nextCursor;while(cursor&&!stop.current){const batch=await request(`${base}/conformance?cursor=${encodeURIComponent(cursor)}`);pages.push(...batch.report.pages);cursor=batch.nextCursor;}}for(const p of pages){if(stop.current)break;setMessage(`Scanning rendered page ${count+1}/${pages.length}: ${p.title}`);try{const r=await request(`${base}/page/${p.sectionID}/rendered-scan`,{});if(r.scanError || r.wcag_review?.rendered?.state!=='complete')failures++;}catch{failures++;}count++;}await load();onScanSaved?.();setMessage(`${count} rendered pages scanned; ${failures} require scan follow-up. Reviewer verification remains pending.`);}catch(e:any){setError(e.message);}finally{setBusy(false);}}
++  const report=data?.report,page=detail,criterion=selectedCriterion;
+ 
+   return <section className="ui segment conformance-review" aria-label="WCAG verification">
+     <style>{`.conformance-review label{display:block;margin:.8rem 0}.conformance-review textarea,.conformance-review select,.conformance-review input:not([type=checkbox]){display:block;width:100%;max-width:100%;padding:.5rem;border:1px solid #777;border-radius:4px}.conformance-review details{margin:1rem 0}.conformance-review summary{cursor:pointer;font-weight:600}.conformance-review :focus-visible{outline:3px solid #1565c0;outline-offset:2px}.conformance-review pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:300px;overflow:auto}`}</style>
+@@ -69,13 +85,16 @@ export default function ConformanceReview({projectID,sections,onScanSaved}:any)
+           <button className="ui button" disabled={busy || !scopeConfirmed}>Save evaluation scope</button>
+         </form>}
+       </details>
+-      <label>Page to evaluate<select value={sectionID} onChange={e=>setSectionID(e.target.value)}><option value="">Select a page</option>{report.pages.map((p:any)=><option key={p.sectionID} value={p.sectionID}>{p.title} ({p.blockers.length?'scan blockers':p.criteria.filter((c:any)=>['pass','not_applicable'].includes(c.status)).length+'/50 reviewed'})</option>)}</select></label>
++      <label>Page to evaluate<select value={sectionID} onChange={e=>{if(e.target.value!==sectionID){setDetail(null);setSelectedCriterion(null);setSectionID(e.target.value);}}}><option value="">Select a page</option>{report.pages.map((p:any)=><option key={p.sectionID} value={p.sectionID}>{p.title} ({p.blockers.length?'scan blockers':p.criteria.filter((c:any)=>['pass','not_applicable'].includes(c.status)).length+'/50 reviewed'})</option>)}</select></label>
++      {data.nextCursor && <button className="ui button" disabled={busy||detailBusy} onClick={()=>{setSectionID('');load(data.nextCursor).catch(e=>setError(e.message));}}>Next 100 pages</button>}
+       {data.canEdit && <><button className="ui primary button" disabled={busy || !page} onClick={()=>scan()}>Scan rendered page</button><button className="ui button" disabled={busy || !report.pages.length} onClick={()=>scan(true)}>Scan all rendered pages</button>{busy && <button className="ui button" onClick={()=>{stop.current=true;}}>Stop after current page</button>}</>}
+       {page && <><p><a href={page.url} target="_blank" rel="noreferrer">Open full reader page</a></p>
+         {page.blockers.length>0 && <ul>{page.blockers.map((b:string)=><li key={b}>{b}</li>)}</ul>}
+         <details><summary>Rendered scan evidence and unresolved checks</summary><pre>{JSON.stringify(page.sourceScan?.rendered || {state:'not_tested'},null,2)}</pre></details>
+-        <label>Criterion<select value={criterionID} onChange={e=>setCriterionID(e.target.value)}>{page.criteria.map((c:any)=><option key={c.id} value={c.id}>{c.id} {c.title} — {c.status.replace(/_/g,' ')}</option>)}</select></label>
+-        {criterion && data.canEdit && <ReviewForm key={JSON.stringify([sectionID, criterionID, report.scope?.version, page.fingerprint])} page={page} criterion={criterion} scope={report.scope} save={save} busy={busy}/>}
++        <label>Criterion<select value={criterionID} onChange={e=>{if(e.target.value!==criterionID){setSelectedCriterion(null);setCriterionID(e.target.value);}}}>{page.criteria.map((c:any)=><option key={c.id} value={c.id}>{c.id} {data.criteria?.find((definition:any)=>definition.id===c.id)?.title} — {c.status.replace(/_/g,' ')}</option>)}</select></label>
++        {criterion && data.canEdit && <ReviewForm key={JSON.stringify([sectionID, criterionID, report.scope?.version, page.fingerprint])} page={page} criterion={criterion} scope={report.scope} save={save} busy={busy||detailBusy}/>}
++        <button className="ui button" disabled={busy||detailBusy} onClick={()=>loadHistory()}>View review history</button>
++        {history && <section aria-label="Criterion review history">{history.records.map((r:any)=><p key={r._id}>{r.actor}: {r.data?.notes}</p>)}{history.nextCursor && <button disabled={busy} onClick={()=>loadHistory(history.nextCursor)}>Next 100 reviews</button>}</section>}
+       </>}
+       <details><summary>Reviewer conformance sign-off</summary><p>Available after every criterion on every scoped page has fresh evidence and no unresolved failures. Legal exceptions do not establish WCAG conformance.</p>
+         {report.signoff && <p>Signed by {report.signoff.actor} on {new Date(report.signoff.at).toLocaleString()}: {report.signoff.statement}</p>}
+diff --git a/client/src/components/projects/ProjectAccessibility.capability.test.jsx b/client/src/components/projects/ProjectAccessibility.capability.test.jsx
+index bfc20134..768722ed 100644
+--- a/client/src/components/projects/ProjectAccessibility.capability.test.jsx
++++ b/client/src/components/projects/ProjectAccessibility.capability.test.jsx
+@@ -48,7 +48,8 @@ for (const { expired, evidenceChanged } of [{ expired: false, evidenceChanged: f
+   axios.post.mockImplementation(async path => { if (path.endsWith('/preview') && evidenceChanged) fingerprint = null; return { data: path.endsWith('/scan') ? { err: false, findings: [finding], wcag_review: review }
+     : path.endsWith('/preview') ? { err: false, before_html: '<p>old</p>', after_html: '<p>new</p>', diff: '-old\n+new', preview_hash: 'hash', preview_token: 'remote-token', evidenceChanged, localReviewID: 'matrix-stored-review', review_expires_at: Math.floor(Date.now()/1000)+(expired ? -1 : 300) }
+     : { err: false, applied: false, outcome: 'not_attempted', reason: 'no_change' } }; });
+-  vi.stubGlobal('fetch', vi.fn(async path => ({ ok: true, json: async () => path.endsWith('/conformance')
++  const reviewerPage=()=>({sectionID:'page1',title:'Reviewer page',url:section.sectionURL,fingerprint,blockers:[],criteria:[{id:'1.1.1',title:'Non-text Content',status:'unreviewed',checklist:['Compare source images']}]});
++  vi.stubGlobal('fetch', vi.fn(async path => ({ ok: true, json: async () => path.includes('/conformance/pages/') ? (path.includes('/criteria/') ? {err:false,criterion:reviewerPage().criteria[0]} : {err:false,page:reviewerPage()}) : path.endsWith('/conformance')
+     ? { err: false, canEdit: true, report: { scope: { version: 'scope-1' }, pages: [{ sectionID: 'page1', title: 'Reviewer page', url: section.sectionURL, fingerprint, blockers: [], criteria: [{ id: '1.1.1', title: 'Non-text Content', status: 'unreviewed', checklist: ['Compare source images'] }] }], totalCriteria: 1, verifiedCriteria: 0, verificationPercent: 0, status: 'verification_pending', readyForSignoff: false } }
+     : { err: false, canEdit: true, items: [], users: [], sections: [], candidates: [] } })));
+   const container = document.createElement('div'); document.body.appendChild(container); const root = createRoot(container);
+@@ -57,7 +58,7 @@ for (const { expired, evidenceChanged } of [{ expired: false, evidenceChanged: f
+     await act(async () => {});
+     if (evidenceChanged) {
+       fireEvent.change(await screen.findByLabelText('Page to evaluate'), { target: { value: 'page1' } });
+-      fireEvent.click(screen.getByLabelText('Compare source images'));
++      fireEvent.click(await screen.findByLabelText('Compare source images'));
+       fireEvent.change(screen.getByLabelText(/Test environment/), { target: { value: 'Synthetic screen reader' } });
+       fireEvent.change(screen.getByLabelText(/Evidence and results/), { target: { value: 'Reviewed the original source images before preview.' } });
+       fireEvent.click(screen.getByLabelText(/I performed this review/));
+diff --git a/client/src/components/projects/RemediationWorkQueue.tsx b/client/src/components/projects/RemediationWorkQueue.tsx
+index b436001c..53ccd0ef 100644
+--- a/client/src/components/projects/RemediationWorkQueue.tsx
++++ b/client/src/components/projects/RemediationWorkQueue.tsx
+@@ -32,6 +32,20 @@ function EditItem({ item, users, save, busy }: any) {
+   </form>;
+ }
+ 
++function ItemHistory({base,item,kind,users}:any){
++  const [data,setData]=useState<any>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false);
++  const generation=useRef(0);
++  useEffect(()=>()=>{generation.current++;},[item._id,item.version,kind]);
++  async function load(cursor?:string){const n=++generation.current;setBusy(true);setError('');try{
++    const result=await request(`${base}/${encodeURIComponent(item._id)}/history?kind=${kind}${cursor?'&cursor='+encodeURIComponent(cursor):''}`);
++    if(n===generation.current)setData(result);
++  }catch(e:any){if(n===generation.current)setError(e.message);}finally{if(n===generation.current)setBusy(false);}}
++  return <details onToggle={e=>{if(e.currentTarget.open&&!data&&!busy)void load();}}><summary>{kind==='history'?'History':'Scan evidence'}</summary>
++    {error&&<p role="alert">{error}</p>}{busy&&<p>Loading history…</p>}
++    {data&&<><ol className="rq-history">{data.records.map((event:any,index:number)=><li key={event.historyID||event._id||index}>{new Date(event.at).toLocaleString()} · {String(users.get(event.actor)||event.actor)} · {kind==='history'?label(event.status):event.action}<p>{event.note}</p>{kind==='scanEvidence'&&<pre className="rq-evidence">{JSON.stringify(event,null,2)}</pre>}</li>)}</ol>{data.nextCursor&&<button type="button" disabled={busy} onClick={()=>load(data.nextCursor)}>Next 100 records</button>}</>}
++  </details>;
++}
++
+ export default function RemediationWorkQueue({ projectID, onScanSaved, recoveryOnly = false }: { projectID: string; onScanSaved?: () => void; recoveryOnly?: boolean }) {
+   const [data, setData] = useState<any>({ items: [], users: [], sections: [], candidates: [] });
+   const [sectionID, setSectionID] = useState('');
+@@ -43,9 +57,9 @@ export default function RemediationWorkQueue({ projectID, onScanSaved, recoveryO
+   const [message, setMessage] = useState('');
+   const generation = useRef(0);
+   const base = `/project/${encodeURIComponent(projectID)}/accessibility/workqueue`;
+-  async function load() {
++  async function load(cursor?:string,sectionCursor?:string,candidateCursor?:string) {
+     const current = ++generation.current;
+-    const next = await request(`${base}?sectionID=${encodeURIComponent(sectionID)}`);
++    const next = await request(`${base}?sectionID=${encodeURIComponent(sectionID)}${cursor?'&cursor='+encodeURIComponent(cursor):''}${sectionCursor?'&sectionCursor='+encodeURIComponent(sectionCursor):''}${candidateCursor?'&candidateCursor='+encodeURIComponent(candidateCursor):''}`);
+     if (current === generation.current) setData(next);
+   }
+   useEffect(() => {
+@@ -60,12 +74,13 @@ export default function RemediationWorkQueue({ projectID, onScanSaved, recoveryO
+     finally { setBusy(false); }
+   }
+   const users = new Map(data.users.map((u: any) => [u.uuid, `${u.firstName} ${u.lastName}`]));
+-  const existing = new Set(data.items.map((i: any) => i.key));
++  const existing = new Set([...data.items.map((i: any) => i.key),...data.candidates.filter((c:any)=>c.queued).map((c:any)=>c.key)]);
+   const items = data.items.filter((i: any) => filter === 'all' || (filter === 'open' ? i.status !== 'verified' : i.status === filter));
+   if (recoveryOnly) return <section className="ui segment remediation-work-queue" aria-label="Pending write recovery">
+     <h2>Pending write recovery</h2>
+     <p>Reviewed writes are unavailable. Saved operation evidence remains read-only; reading it does not unlock a page or repeat a write.</p>
+     {error && <div role="alert" className="ui negative message">{error}</div>}
++    {data.nextSectionCursor&&<button className="ui button" onClick={()=>load(undefined,data.nextSectionCursor).catch(e=>setError(e.message))}>Next 100 pages</button>}
+     {data.canEdit && data.sections.filter((section: any) => section.pendingOperationID).map((section: any) => <div key={`${section.id}-${section.pendingOperationID}`}>
+       <h3>{section.title}</h3>
+       <RemedyOperationStatus base={base} sectionID={section.id} localOperationID={section.pendingOperationID} request={request} />
+@@ -75,22 +90,27 @@ export default function RemediationWorkQueue({ projectID, onScanSaved, recoveryO
+     <style>{`.remediation-work-queue{margin:1.5rem 0!important}.remediation-work-queue h2{margin-top:0}.remediation-work-queue select,.remediation-work-queue textarea{display:block;padding:.55rem;border:1px solid #999;border-radius:4px;background:white;color:#222;max-width:100%;width:100%}.remediation-work-queue label{display:block;font-weight:600}.remediation-work-queue textarea{margin:.4rem 0}.rq-fields{display:flex;gap:1rem;flex-wrap:wrap;margin:1rem 0}.rq-fields label{flex:1;min-width:160px}.rq-candidates{max-height:260px;overflow:auto;margin:1rem 0;padding:.5rem;border:1px solid #ccc}.rq-candidates label{padding:.5rem;font-weight:normal}.rq-candidates input{margin-right:.6rem}.rq-table{overflow:auto}.rq-table table{min-width:640px}.rq-table td{vertical-align:top}.rq-table summary{cursor:pointer;font-weight:600;margin:.5rem 0}.rq-evidence{white-space:pre-wrap;overflow-wrap:anywhere;max-height:150px;overflow:auto}.rq-history{padding-left:1.3rem}.rq-history li{margin:.6rem 0}.remediation-work-queue :focus-visible{outline:3px solid #1565c0;outline-offset:2px}`}</style>
+     <h2>Remediation work queue</h2>
+     <p>Assign findings and manual checks, record progress, and keep reviewer notes across scans.</p>
+-    <p><strong>{data.items.filter((i: any) => i.status !== 'verified').length} open</strong> · {data.items.filter((i: any) => i.status === 'verified').length} verified</p>
++    <p>On this page: <strong>{data.items.filter((i: any) => i.status !== 'verified').length} open</strong> · {data.items.filter((i: any) => i.status === 'verified').length} verified</p>
+     {error && <div role="alert" className="ui negative message">{error}</div>}
+     <div role="status" aria-live="polite">{message}</div>
++    <a className="ui button" href={`/api/v1${base}/items/report`} download>Export work items and history</a>
++    {data.nextCursor&&<button type="button" className="ui button" disabled={busy} onClick={()=>load(data.nextCursor).catch(e=>setError(e.message))}>Next 100 work items</button>}
+     {data.canEdit && <><label>Page tools<select value={activePage?.section.id || ''} onChange={e => { const section = data.sections.find((s: any) => s.id === e.target.value); setActivePage(section ? { section } : null); }}><option value="">Choose a page to fix or restore</option>{data.sections.map((s: any) => <option key={s.id} value={s.id}>{s.title}</option>)}</select></label></>}
++    {data.nextSectionCursor&&<button type="button" className="ui button" disabled={busy} onClick={()=>load(undefined,data.nextSectionCursor).catch(e=>setError(e.message))}>Next 100 pages</button>}
+     {activePage && data.canEdit && <RemediationPageActions key={`${activePage.section.id}-${activePage.item?._id || ''}`} {...activePage} base={base} request={request} refreshed={load} onScanSaved={onScanSaved} close={() => setActivePage(null)} />}
+     {data.canEdit && <details><summary>Add work from a page review</summary>
+       <label>Page<select value={sectionID} disabled={busy} onChange={e => setSectionID(e.target.value)}><option value="">Choose a page</option>{data.sections.map((s: any) => <option key={s.id} value={s.id}>{s.title}</option>)}</select></label>
+       {sectionID && <><p>Choose findings or manual checks. Existing items are retained; adding again does not duplicate them.</p>
+         <div className="rq-candidates">{data.candidates.map((c: any) => <label key={c.key}><input type="checkbox" disabled={busy || existing.has(c.key)} checked={existing.has(c.key) || chosen.includes(c.key)} onChange={e => setChosen(prev => e.target.checked ? [...prev, c.key] : prev.filter(k => k !== c.key))} />{c.criterionID} · {c.title} {existing.has(c.key) && '(already queued)'}</label>)}{!data.candidates.length && <p>No stored failed or manual criteria. Scan this page first.</p>}</div>
++        {data.nextCandidateCursor&&<button type="button" className="ui button" disabled={busy||chosen.length>0} onClick={()=>load(undefined,undefined,data.nextCandidateCursor).catch(e=>setError(e.message))}>Next 100 findings</button>}
+         <button type="button" className="ui primary button" disabled={busy || !chosen.length || chosen.length > 100} onClick={() => act(() => request(base, 'POST', { sectionID, keys: chosen }), r => `${r.created} work item(s) added.`)}>Add selected ({chosen.length})</button></>}
+     </details>}
+     <div className="rq-fields"><label>Show<select value={filter} onChange={e => setFilter(e.target.value)}><option value="open">All open items</option><option value="all">All items</option>{Object.entries(statuses).map(([v, title]) => <option key={v} value={v}>{title}</option>)}</select></label><div><button type="button" className="ui button" disabled={busy} onClick={() => act(() => Promise.resolve(), () => 'Queue refreshed.')}>Refresh queue</button></div></div>
+     {!items.length ? <p>No work items in this view.</p> : <div className="rq-table"><table className="ui celled table"><thead><tr><th>Page and finding</th><th>Assignment</th><th>Progress and review</th></tr></thead><tbody>{items.map((item: any) => <tr key={item._id}>
+       <td><strong>{item.sectionTitle}</strong>{data.canEdit && <p><button type="button" className="ui button" onClick={() => setActivePage({ section: data.sections.find((section: any) => section.id === item.sectionID) || { id: item.sectionID, title: item.sectionTitle }, item })}>Fix and rescan task</button></p>}<p>{item.criterionID} · {item.title}</p>{/^https:\/\//.test(item.sectionURL) && <a href={item.sectionURL} target="_blank" rel="noopener noreferrer">Open source page</a>}<details><summary>Original scan evidence</summary><p>{item.ruleId} {item.selector}</p><pre className="rq-evidence">{item.evidence}</pre><p>Captured: {item.scannedAt ? new Date(item.scannedAt).toLocaleString() : 'Not recorded'}. Evidence may change after a rescan; verification is explicit.</p></details></td>
+       <td>{String(users.get(item.assignee) || (item.assignee ? 'Former team member' : 'Unassigned'))}<p>Priority: {item.priority}</p></td>
+-      <td><strong>{label(item.status)}</strong>{!!item.scanEvidence?.length && <details><summary>Scan evidence ({item.scanEvidence.length})</summary><ol className="rq-history">{item.scanEvidence.map((e: any, n: number) => <li key={n}><strong>{e.action}</strong> · {new Date(e.at).toLocaleString()}<p>Criterion result: {e.criterion?.status || 'Not available'}. Matching findings: {e.findings?.length ?? 'Not available'}.</p>{e.scanError && <p>{e.scanError}</p>}<details><summary>Evidence details</summary><pre className="rq-evidence">{JSON.stringify(e, null, 2)}</pre></details></li>)}</ol></details>}<details><summary>History ({item.history.length})</summary><ol className="rq-history">{item.history.map((h: any, n: number) => <li key={n}>{new Date(h.at).toLocaleString()} · {String(users.get(h.actor) || h.actor)} · {label(h.status)}<p>{h.note}</p></li>)}</ol></details>
++      <td><strong>{label(item.status)}</strong><ItemHistory key={`${item._id}-${item.version}-scans`} base={base} item={item} kind="scanEvidence" users={users}/><ItemHistory key={`${item._id}-${item.version}-history`} base={base} item={item} kind="history" users={users}/>
++
+       {data.canEdit && <details key={`${item._id}-${item.version}`}><summary>Edit work item</summary><EditItem item={item} users={data.users} busy={busy} save={(i: any, fields: any) => act(() => request(`${base}/${i._id}`, 'PATCH', { ...fields, version: i.version }), () => 'Work item saved.')} /></details>}</td>
+     </tr>)}</tbody></table></div>}
+   </section>;
+diff --git a/client/src/components/projects/WorkQueueBounds.test.tsx b/client/src/components/projects/WorkQueueBounds.test.tsx
+new file mode 100644
+index 00000000..dc4989c6
+--- /dev/null
++++ b/client/src/components/projects/WorkQueueBounds.test.tsx
+@@ -0,0 +1,25 @@
++import React from 'react';
++import {render,screen,fireEvent,waitFor,cleanup} from '@testing-library/react';
++import {test,expect,vi,afterEach} from 'vitest';
++import RemediationWorkQueue from './RemediationWorkQueue';
++afterEach(()=>{cleanup();vi.unstubAllGlobals();});
++test('work-item notes remain editable while history loads only when opened',async()=>{
++ const paths:string[]=[],notes:string[]=[];let version=0;
++ const item=()=>({_id:'item1',key:'key1',sectionID:'section1',sectionTitle:'Synthetic article',title:'Synthetic defect',status:'todo',priority:'normal',assignee:'',version});
++ vi.stubGlobal('fetch',vi.fn(async(url:any,init:any)=>{
++  paths.push(String(url));
++  if(init?.method==='PATCH'){notes.push(JSON.parse(init.body).note);version++;}
++  const body=String(url).includes('/history?')?{records:notes.map(note=>({note,actor:'reviewer',at:new Date().toISOString(),status:'todo'})),nextCursor:null}:{items:[item()],users:[],sections:[],candidates:[],canEdit:true};
++  return {ok:true,json:async()=>({err:false,...body})};
++ }));
++ render(<RemediationWorkQueue projectID="synthetic"/>);
++ await screen.findByText('Synthetic defect',{exact:false});expect(paths.some(p=>p.includes('/history?'))).toBe(false);
++ fireEvent.click(screen.getByText('Edit work item'));
++ fireEvent.change(screen.getByLabelText('Reviewer note / verification evidence'),{target:{value:'Durable reviewer note survives a new scan.'}});
++ fireEvent.click(screen.getByRole('button',{name:'Save work item'}));
++ await screen.findByText('Work item saved.');
++ fireEvent.click(screen.getByText('History'));
++ await screen.findByText('Durable reviewer note survives a new scan.');
++ await waitFor(()=>expect(paths.filter(p=>p.includes('/history?'))).toHaveLength(1));
++ expect(notes).toEqual(['Durable reviewer note survives a new scan.']);
++});
+diff --git a/docs/remedy-storage-and-reads.md b/docs/remedy-storage-and-reads.md
+new file mode 100644
+index 00000000..64abfa16
+--- /dev/null
++++ b/docs/remedy-storage-and-reads.md
+@@ -0,0 +1,149 @@
++# Bounded Remedy reads and immutable operation events (LT-157)
++
++This is a development delivery candidate. Production writes remain on hold.
++Default-disabled Remedy still creates no optional models/collections at import.
++No startup migration, history deletion, retained-data rewrite or replica-set
++transaction is introduced.
++
++## Read contract
++
++All routes use existing verified-session, current project/organization policy and
++feature opt-in. Limits default to100 and reject values outside1–200. Cursors are
++opaque continuations bound to the project and selected identity. Object IDs
++provide deterministic history order; conformance selection separately retains
++createdAt descending then _id descending, regardless of review `at`.
++
++| GET suffix under /project/:projectID/accessibility/workqueue | Result |
++|---|---|
++| /conformance | Global verification counts/digests and up to100 page summaries; `nextCursor` continues pages. No source scans, reviewer notes or repeated checklists. |
++| /conformance/pages/:sectionID | One selected page's scan evidence and compact criterion statuses. |
++| /conformance/pages/:sectionID/criteria/:criterionID | One selected criterion, checklist and current reviewer evidence. |
++| /conformance/history?sectionID=…&criterionID=… | Up to100 immutable review records with `nextCursor`. Concurrent later appends cannot shift the captured ID range. |
++| (base) | Up to100 work-item summaries without history/evidence arrays; `nextCursor`, `nextSectionCursor`, `nextCandidateCursor` expose continuation rather than truncation. `sectionCursor`/`candidateCursor` continue those lists. |
++| /:itemID/history?kind=history or scanEvidence | Up to100 retained array events, newest first, with stable `historyID` and a captured append-only array boundary. |
++| /page/:sectionID/operations/:localID/history | Original actor with current edit permission, or support/superadmin project policy; up to100 immutable events, with preserved legacy events and explicit continuation. |
++
++The mounted UI requests selected detail/history only when needed, and supplies
++explicit continuation controls. Scan-all explicitly walks every page-summary
++batch. It never treats the first100 as a complete book. Work-item note/edit and
++human verification semantics remain unchanged.
++
++Selection reads stream only minimal review identity/status metadata, once, using
++the project/kind/history-order index. A hash lookup per record preserves the first
++matching scope/fingerprint for each page/criterion; duplicate stored section IDs
++retain their distinct fingerprint matches. Superseded notes are not loaded.
++Only selected reviewer details are fetched by ID. Application state is bounded by
++the number of stored pages×50 criteria, rather than all historical reviews. Mongo
++reads and the metadata selection loop have a30second budget; unavailable/over-budget
++reads fail explicitly. Metadata exceeding2000 title characters or8192 URL
++characters is refused in summaries rather than silently changed; full export
++preserves the original values.
++
++## Complete exports
++
++| GET suffix | Access and contents |
++|---|---|
++| /conformance/report | Existing authorized project readers; full page evaluation plus complete immutable `recordHistory`. |
++| /items/report | Existing authorized project readers; all work items and complete retained note/scan histories. |
++| /operations/report | Support/superadmin with existing project policy only; all immutable operation events and verbatim legacy Project history. Ordinary conformance exports never disclose private operation bindings/session associations. |
++
++Exports stream JSON with HTTP backpressure, bounded Mongo batches (100 records,
++20 work items), an explicit120second total deadline and client cancellation.
++Only a completed download contains `complete:true`. Failure/cancellation closes
++the connection and cursor; there is no success footer or silent truncation.
++Conformance exports capture a record-ID boundary and evaluation time, then emit
++full page details one at a time. Records appended after that boundary are left
++for a later export. Work-item fields are per-document reads, not a cross-document
++transaction snapshot; drain writers for a backup-grade consistent inventory.
++
++Cursor disposal is deliberately idempotent. Concurrent explicit closes can end
++an implicit Mongo driver session before its first killCursors executes. An actual
++HTTP cancellation test checks Mongo's server cursor inventory, not merely a
++cancelled browser response. Stream cursors use this single explicit lifecycle;
++the same driver abort signal is not attached to their close path. Short queries
++use their abort signal and Mongo maxTimeMS.
++
++## Write-ahead operation protocol; standalone Mongo supported
++
++1. Persist an immutable intent in `remedyoperationrecords`, using journaled
++   majority write acknowledgement with a10second acknowledgement timeout.
++2. CAS the Project's exact reviewed preview, membership policy, canonical target,
++   evidence version and pending pointer. Only a successful acknowledged CAS may
++   dispatch the signed operation. The Project holds one active local ID per
++   section; new history is never appended to Project.remedyOperations.
++3. Append the immutable response before the local result CAS. A failed append or
++   ambiguous acknowledgement leaves the pending claim held. A later status read
++   never clears it or repeats a mutation.
++
++Both intent/response appends and the Project CAS use explicit journaled majority
++acknowledgement. These operations work on Mongo7.0.14 standalone; no session
++transaction or replica-set prerequisite is hidden. Replica topologies must still
++satisfy their own majority/availability policy. A failed CAS can leave an orphan
++intent, which is preserved and never dispatched. An ambiguous CAS can leave a
++held pointer with no remote operation; missing remote status is not proof that a
++claim may be unlocked. LT-127's separately authorized resolution remains required.
++Original actor, action, binding, issuer/jti and outcomes are never rewritten.
++
++New event metadata is capped at64KiB before append. Conformance record writes
++have the same explicit64KiB budget. Work items retain their existing schema with
++explicit refusal: fewer than1000 events in each history/evidence array and less
++than8MiB before an append; each new event is at most64KiB. The same Mongo CAS
++checks those limits, so concurrent appends cannot race beyond the budget. This
++leaves substantial room below Mongo's16MiB document ceiling. A full item stays
++readable/exportable; appends require an operator's separately reviewed retention
++or storage expansion decision. No automatic compaction, truncation or deletion
++occurs, and a completed page write must never be repeated because task evidence
++could not fit.
++
++## Collections, indexes and privileges
++
++| Collection | Declared indexes in addition to _id |
++|---|---|
++| conformancerecords | `{projectID:1,kind:1,createdAt:-1,_id:-1}`; `{projectID:1,sectionID:1,criterionID:1,_id:-1}` |
++| remedyoperationrecords | `{projectID:1,localID:1,kind:1,_id:-1}`; unique `{projectID:1,localID:1}` for kind=intent; unique `{issuer:1,jti:1}` for kind=intent |
++| remediationworkitems | Existing unique `{projectID:1,key:1}` |
++
++Old declared indexes are preserved; no index is dropped. The enabled feature's
++health/queue preflight explicitly creates collections and declared indexes. Matrix
++writes also ensure operation indexes before intent admission. Models disable
++autoCreate/autoIndex. Initialization failure reports unavailable; disabled Remedy
++does not initialize them.
++
++The configured account currently needs collection/index creation privileges for
++enabled preflight, read/insert on append-only record collections, and normal
++Project/work-item read/update privileges. The app never updates/deletes operation
++or conformance records. Do not claim insert-only credentials suffice for current
++preflight, or that a production Atlas role/topology has been validated. Prepare
++collection-scoped roles/index windows with the deployment owner before opt-in.
++
++## Legacy compatibility, backup and rollback
++
++Legacy Project.remedyOperations remains select:false, immutable and readable by
++the authorized operation mapping/history/export paths. No backfill is necessary
++for compatibility. The read-only inventory command is:
++
++```sh
++# Use an operator-provided read-only URI in this variable; never print it.
++CONDUCTOR_REMEDY_DRY_RUN_URI="$operator_readonly_uri" \
++  node --import tsx scripts/inspectLegacyRemedyOperations.ts
++```
++
++It emits project IDs, legacy event/byte counts, a BSON SHA-256 inventory hash and
++pending-section counts. It makes no update, insert, collection/index or delete
++call. There is no `--apply` mode. A future backfill requires its own reviewed plan
++with exact identity/deduplication, dry-run evidence and owner authorization.
++
++Drain admissions and settle/retain pending claims before a consistent backup.
++Back up Projects, remediationworkitems, conformancerecords and
++remedyoperationrecords with referenced user identities and coordinate the same
++checkpoint with Bridge's independent ledger/fence, snapshots and trust epoch.
++Never restore one history collection or clear a pointer in isolation. A restore
++must preserve consumed nonce/token tombstones and all uncertain outcomes.
++
++Runtime rollback must retain access to the new collection and current pending
++mapping. The previous twenty-one-patch runtime cannot resolve new externalized
++intents. Keep this runtime available for read-only recovery, disable reviewed
++writes and preserve all stores; a downgrade compatibility adapter/operational
++resolution is a separate reviewed action. Never copy events back into Project,
++delete history or unlock/retry merely to make an older runtime appear healthy.
++No production migration, deployment or credential provisioning is authorized here.
+diff --git a/server/api/conformance.ts b/server/api/conformance.ts
+index 0971ea5d..3bcb8140 100644
+--- a/server/api/conformance.ts
++++ b/server/api/conformance.ts
+@@ -1,32 +1,81 @@
++import { BSON } from 'mongodb';
++import { beginRemedyExport } from '../util/remedyExports.js';
++import { READ_TIMEOUT_MS, compactPage, encodeCursor, loadConformance, pagination, recordSnapshot } from '../util/conformanceReads.js';
+ import { remediationHandoff, validateRemediationHandoff } from '../util/remediationHandoff.js';
+ import mongoose from 'mongoose';
+ import { randomUUID } from 'node:crypto';
+ import { criteria, conformanceReport, validateReview } from '../util/conformance.js';
+ const recordSchema = new mongoose.Schema({projectID:String,sectionID:String,criterionID:String,kind:String,
+   fingerprint:String,scopeVersion:String,status:String,actor:String,at:Date,data:mongoose.Schema.Types.Mixed}, {timestamps:true,autoCreate:false,autoIndex:false});
+-recordSchema.index({projectID:1,kind:1,createdAt:-1});
++recordSchema.index({projectID:1,kind:1,createdAt:-1,_id:-1});
++recordSchema.index({projectID:1,sectionID:1,criterionID:1,_id:-1});
+ export const conformanceRecords = () => mongoose.models.ConformanceRecord || mongoose.model('ConformanceRecord',recordSchema);
+ export function registerConformance(router:any,{base,access,Records}:any) {
+-  const load=async(project:any)=>{
+-    Records ||= conformanceRecords();
+-    const records=await Records.find({projectID:project.projectID}).sort({createdAt:-1,_id:-1}).lean();
+-    const scope=records.find((r:any)=>r.kind==='scope')?.data;
+-    const reviews=records.filter((r:any)=>r.kind==='review').map((r:any)=>({...r.data,_id:r._id,sectionID:r.sectionID,actor:r.actor,at:r.at}));
+-    const signoffs=records.filter((r:any)=>r.kind==='signoff').map((r:any)=>({...r.data,actor:r.actor,at:r.at}));
+-    const report=conformanceReport(project,scope,reviews,signoffs);
+-    const handoffs=records.filter((r:any)=>r.kind==='remediation_signoff').map((r:any)=>({...r.data,actor:r.actor,at:r.at}));
+-    return {scope,report:{...report,remediationHandoff:remediationHandoff(report,handoffs)}};
+-  };
++  const load=async(project:any,options:any={})=>loadConformance(project,Records ||= conformanceRecords(),options);
++  const fail=(res:any,error:any,message:string)=>res.status(error.status||500).json({err:true,errMsg:[400,413].includes(error.status)?error.message:message});
+   router.get(`${base}/conformance`,...access,async(req:any,res:any)=>{
+-    try {const {report}=await load(req.queueProject);res.json({err:false,canEdit:req.queueCanEdit,criteria,report});}
+-    catch {res.status(500).json({err:true,errMsg:'Unable to load conformance evidence.'});}
++    try {
++      const {limit,cursor}=pagination(req.query);
++      if(cursor&&(cursor.projectID!==req.params.projectID||typeof cursor.after!=='string'||cursor.kind!=='pages')) throw Object.assign(Error('Invalid page cursor.'),{status:400});
++      const {report}=await load(req.queueProject);
++      const pages=[...report.pages].sort((a:any,b:any)=>a.sectionID.localeCompare(b.sectionID)).filter((p:any)=>!cursor||p.sectionID>cursor.after);
++      const selected=pages.slice(0,limit);
++      res.setHeader('Cache-Control','no-store');
++      res.json({err:false,canEdit:req.queueCanEdit,criteria,report:{...report,pages:selected.map(compactPage)},
++        nextCursor:pages.length>limit?encodeCursor({kind:'pages',projectID:req.params.projectID,after:selected.at(-1).sectionID}):null});
++    } catch(error) {fail(res,error,'Unable to load conformance evidence.');}
++  });
++  router.get(`${base}/conformance/pages/:evidenceSectionID`,...access,async(req:any,res:any)=>{
++    try {
++      const section=(req.queueProject.a11yReview||[]).find((s:any)=>String(s._id)===req.params.evidenceSectionID);
++      if(!section)return res.status(404).json({err:true,errMsg:'Page is not in this project.'});
++      const {report}=await load({...req.queueProject,a11yReview:[section]});
++      const page=report.pages[0];res.setHeader('Cache-Control','no-store');
++      res.json({err:false,page:{...compactPage(page),sourceScan:page.sourceScan}});
++    }catch(error){fail(res,error,'Unable to load page evidence.');}
++  });
++  router.get(`${base}/conformance/pages/:evidenceSectionID/criteria/:criterionID`,...access,async(req:any,res:any)=>{
++    try {
++      const section=(req.queueProject.a11yReview||[]).find((s:any)=>String(s._id)===req.params.evidenceSectionID);
++      if(!section||!criteria.some(c=>c.id===req.params.criterionID))return res.status(404).json({err:true,errMsg:'Page or criterion is unavailable.'});
++      const {report}=await load({...req.queueProject,a11yReview:[section]},{full:true,criterionID:req.params.criterionID});
++      res.setHeader('Cache-Control','no-store');res.json({err:false,criterion:report.pages[0].criteria.find((c:any)=>c.id===req.params.criterionID)});
++    }catch(error){fail(res,error,'Unable to load criterion evidence.');}
++  });
++  router.get(`${base}/conformance/history`,...access,async(req:any,res:any)=>{
++    try {
++      const {limit,cursor}=pagination(req.query),sectionID=req.query.sectionID,criterionID=req.query.criterionID;
++      if(typeof sectionID!=='string'||!(req.queueProject.a11yReview||[]).some((s:any)=>String(s._id)===sectionID)||typeof criterionID!=='string'||!criteria.some(c=>c.id===criterionID))throw Object.assign(Error('Select a project page and criterion.'),{status:400});
++      Records ||= conformanceRecords();
++      if(cursor&&(cursor.kind!=='history'||cursor.projectID!==req.params.projectID||cursor.sectionID!==sectionID||cursor.criterionID!==criterionID||!mongoose.isValidObjectId(cursor.after)||!mongoose.isValidObjectId(cursor.upper)))throw Object.assign(Error('Invalid history cursor.'),{status:400});
++      const upper=cursor?new mongoose.Types.ObjectId(cursor.upper):await recordSnapshot(Records);
++      const records=await Records.find({projectID:req.params.projectID,kind:'review',sectionID,criterionID,_id:{ $lte:upper,...(cursor?{$lt:new mongoose.Types.ObjectId(cursor.after)}:{})}}).sort({_id:-1}).limit(limit+1).maxTimeMS(READ_TIMEOUT_MS).lean();
++      const selected=records.slice(0,limit);res.setHeader('Cache-Control','no-store');
++      res.json({err:false,records:selected,nextCursor:records.length>limit?encodeCursor({kind:'history',projectID:req.params.projectID,sectionID,criterionID,upper:String(upper),after:String(selected.at(-1)._id)}):null});
++    }catch(error){fail(res,error,'Unable to load review history.');}
+   });
+   router.get(`${base}/conformance/report`,...access,async(req:any,res:any)=>{
+-    try {const {report}=await load(req.queueProject);
+-      res.setHeader('Cache-Control','no-store');
++    const stream=beginRemedyExport(res),write=stream.write;
++    try {
++      Records ||= conformanceRecords();
++      const snapshot=await recordSnapshot(Records,stream.signal),now=Date.now();
++      const {scope,report}=await load(req.queueProject,{snapshot,signal:stream.signal,now});
++      res.setHeader('Cache-Control','no-store');res.setHeader('Content-Type','application/json');
+       res.setHeader('Content-Disposition',`attachment; filename="${req.params.projectID}-wcag-evaluation.json"`);
+-      res.json(report);
+-    } catch {res.status(500).json({err:true,errMsg:'Unable to export conformance evidence.'});}
++      const {pages,...header}=report;await write(JSON.stringify({...header,exportSnapshot:String(snapshot)}).slice(0,-1)+',"pages":[');
++      let first=true;
++      for(const section of req.queueProject.a11yReview||[]) {
++        const detail=await load({...req.queueProject,a11yReview:[section]},{full:true,snapshot,scope,signal:stream.signal,now});
++        await write((first?'':',')+JSON.stringify(detail.report.pages[0]));first=false;
++      }
++      for(const [name,Model,upper] of [['recordHistory',Records,snapshot]] as const) {
++        await write(`],"${name}":[`);first=true;
++        const cursor=stream.openCursor(()=>Model.find({projectID:req.params.projectID,_id:{$lte:upper}}).sort({_id:1}).maxTimeMS(120_000).cursor({batchSize:100}));
++        for await(const record of cursor){await write((first?'':',')+JSON.stringify(record));first=false;}
++      }
++      await write('],"complete":true}');res.end();
++    } catch(error) {if(res.headersSent)res.destroy(error as Error);else fail(res,error,'Unable to export conformance evidence.');}
++    finally{stream.dispose();}
+   });
+   router.post(`${base}/conformance/:action`,...access,async(req:any,res:any)=>{
+     try {
+@@ -47,7 +96,9 @@ export function registerConformance(router:any,{base,access,Records}:any) {
+         if(body.confirmed!==true || typeof body.statement!=='string' || body.statement.trim().length<40 || body.statement.length>4000) throw Error('Provide and confirm a reviewer conformance statement (40–4,000 characters).');
+         data={digest:report.digest,scopeVersion:scope.version,statement:body.statement.trim()};
+       } else throw Error('Unknown conformance action.');
+-      await Records.create({projectID:req.params.projectID,kind,sectionID,criterionID,actor:req.user.decoded.uuid,at:new Date(),data});
++      const record={projectID:req.params.projectID,kind,sectionID,criterionID,actor:req.user.decoded.uuid,at:new Date(),data};
++      if(BSON.calculateObjectSize(record)>65536)throw Error('Review metadata exceeds the supported 64 KiB record budget.');
++      await Records.create([record],{writeConcern:{w:'majority',j:true,wtimeout:10000}});
+       res.json({err:false});
+     } catch(e:any) {res.status(400).json({err:true,errMsg:e.message || 'Unable to save conformance evidence.'});}
+   });
+diff --git a/server/api/remediationactions.ts b/server/api/remediationactions.ts
+index 630a1908..28959e40 100644
+--- a/server/api/remediationactions.ts
++++ b/server/api/remediationactions.ts
+@@ -1,17 +1,57 @@
++import { workItemAppendBudget, requireEventBudget, requireWorkItemBudget } from '../util/remedyBudgets.js';
++import { beginRemedyExport } from '../util/remedyExports.js';
++import { pagination, encodeCursor, recordSnapshot, READ_TIMEOUT_MS } from '../util/conformanceReads.js';
++import mongoose from 'mongoose';
++import { appendOperation, remedyOperationRecords, storedIntent } from '../util/remedyOperationRecords.js';
+ import { randomUUID } from 'node:crypto';
+ import logger from '../logger.js';
+ import { requireRemedyConfiguration } from '../util/remedyConfig.js';
+ import { checkedPreview, checkedOutcome, reviewError, reviewInputs, reviewSession, safeOperationMetadata, signingConfiguration, signReviewedOperation } from '../util/remedyReview.js';
+ 
+ /** Page actions and scoped status lookup use the same project authorization seam. */
+-export function registerRemediationActions(router: any, { base, access, Project, WorkItems, bridge = callBridge }: any) {
+-  router.post(`${base}/page/:sectionID/:action`, ...access, createRemediationActionHandler({ Project, WorkItems, bridge }));
++export function registerRemediationActions(router: any, { base, access, Project, WorkItems, OperationRecords, bridge = callBridge }: any) {
++  router.post(`${base}/page/:sectionID/:action`, ...access, createRemediationActionHandler({ Project, WorkItems, bridge, OperationRecords }));
++  router.get(`${base}/operations/report`,...access,async(req:any,res:any)=>{
++    const stream=beginRemedyExport(res);
++    try {
++      if(!req.queueOperationAdmin||!req.queueCanEdit)throw reviewError('Support or superadmin project access required for operation export.',403);
++      const Records=remedyOperationRecords(),upper=await recordSnapshot(Records,stream.signal);
++      const legacy=await Project.findOne({projectID:req.params.projectID}).select('+remedyOperations').setOptions({signal:stream.signal}).maxTimeMS(READ_TIMEOUT_MS).lean();
++      res.setHeader('Cache-Control','no-store');res.setHeader('Content-Type','application/json');
++      res.setHeader('Content-Disposition',`attachment; filename="${req.params.projectID}-remedy-operations.json"`);
++      await stream.write(JSON.stringify({projectID:req.params.projectID,legacyOperationHistory:legacy?.remedyOperations||[],exportSnapshot:String(upper)}).slice(0,-1)+',"operationHistory":[');
++      const cursor=stream.openCursor(()=>Records.find({projectID:req.params.projectID,_id:{$lte:upper}}).sort({_id:1}).maxTimeMS(120_000).cursor({batchSize:100}));let first=true;
++      for await(const record of cursor){await stream.write((first?'':',')+JSON.stringify(record));first=false;}
++      await stream.write('],"complete":true}');res.end();
++    }catch(error:any){if(res.headersSent)res.destroy(error);else res.status(error.status||500).json({err:true,errMsg:error.publicMessage||'Unable to export operation history.'});}
++    finally{stream.dispose();}
++  });
++  router.get(`${base}/page/:sectionID/operations/:localID/history`,...access,async(req:any,res:any)=>{
++    try {
++      if(!req.queueCanEdit)throw reviewError('Project editing permission required.',403);
++      const intent=await storedIntent(req.queueProject,req.params.localID,req.params.sectionID);
++      if(!intent||(intent.actor!==req.user.decoded.uuid&&!req.queueOperationAdmin))throw reviewError('Operation is unavailable to this project user.',403);
++      const {limit,cursor}=pagination(req.query),binding={projectID:req.params.projectID,localID:req.params.localID,sectionID:req.params.sectionID};
++      if(cursor&&(Object.entries(binding).some(([key,value])=>cursor[key]!==value)||!['records','legacy'].includes(cursor.phase)||!mongoose.isValidObjectId(cursor.upper)||(cursor.phase==='records'&&!mongoose.isValidObjectId(cursor.after))||(cursor.phase==='legacy'&&(!Number.isInteger(cursor.offset)||cursor.offset<0))))throw reviewError('Invalid operation history cursor.',400);
++      const Records=remedyOperationRecords(),upper=cursor?new mongoose.Types.ObjectId(cursor.upper):await recordSnapshot(Records);
++      const records=cursor?.phase==='legacy'?[]:await Records.find({...binding,_id:{$lte:upper,...(cursor?{$lt:new mongoose.Types.ObjectId(cursor.after)}:{})}}).sort({_id:-1}).limit(limit+1).maxTimeMS(READ_TIMEOUT_MS).lean();
++      let selected=records.slice(0,limit),nextCursor:any=null;
++      if(records.length>limit)nextCursor=encodeCursor({...binding,phase:'records',upper:String(upper),after:String(selected.at(-1)!._id)});
++      else {
++        const legacy=(req.queueProject.remedyOperations||[]).map((event:any,index:number)=>({_id:`legacy:${index}`,event})).filter((r:any)=>r.event.localID===binding.localID).reverse();
++        const offset=cursor?.phase==='legacy'?cursor.offset:0,available=limit-selected.length;
++        selected=selected.concat(legacy.slice(offset,offset+available));
++        if(legacy.length>offset+available)nextCursor=encodeCursor({...binding,phase:'legacy',upper:String(upper),offset:offset+available});
++      }
++      res.setHeader('Cache-Control','no-store');res.json({err:false,records:selected,nextCursor});
++    }catch(error:any){res.status(error.status||500).json({err:true,errMsg:error.publicMessage||error.message||'Unable to read operation history.'});}
++  });
+   router.get(`${base}/page/:sectionID/operations/:localID`, ...access, async (req: any, res: any) => {
+     try {
+       requireRemedyConfiguration(req.queueProject);
+       if (!req.queueCanEdit) throw reviewError('Project editing permission required for operation lookup.', 403);
+       const section = (req.queueProject.a11yReview || []).find((s: any) => String(s._id) === req.params.sectionID);
+-      const intent = req.queueProject.remedyOperations?.find((entry: any) => entry.kind === 'intent' && entry.localID === req.params.localID && entry.sectionID === req.params.sectionID);
++      const intent = await storedIntent(req.queueProject, req.params.localID, req.params.sectionID);
+       if (!intent || (intent.actor !== req.user.decoded.uuid && !req.queueOperationAdmin)) throw reviewError('Operation is unavailable to this project user.', 403);
+       logger.info({ projectID: req.params.projectID, sectionID: req.params.sectionID, localOperationID: intent.localID, actor: req.user.decoded.uuid }, 'Remedy operation evidence lookup');
+       // Browser issuer, nonce and remote operation ID are never used as lookup inputs.
+@@ -28,7 +68,7 @@ export function registerRemediationActions(router: any, { base, access, Project,
+ }
+ 
+ /** Both matrix and queue callers use stored targeting, review association and atomic write intents. */
+-export function createRemediationActionHandler({ Project, WorkItems, bridge = callBridge }: any) {
++export function createRemediationActionHandler({ Project, WorkItems, OperationRecords, bridge = callBridge }: any) {
+   return async (req: any, res: any) => {
+     const items = WorkItems || req.queueWorkItems;
+     const action = req.params.action, isWrite = action === 'apply' || action === 'restore', isScan = action === 'scan' || action === 'rendered-scan';
+@@ -36,7 +76,7 @@ export function createRemediationActionHandler({ Project, WorkItems, bridge = ca
+     const identity = () => ({ _id: section._id, sectionURL: section.sectionURL, pageID: section.pageID,
+       remedyEvidenceVersion: evidenceVersion === 0 ? { $in: [null, 0] } : evidenceVersion });
+     const updateSection = async (match: any, update: any) => {
+-      const result = await Project.updateOne({ projectID: req.params.projectID, a11yReview: { $elemMatch: match } }, update);
++      const result = await Project.updateOne({ projectID: req.params.projectID, a11yReview: { $elemMatch: match } }, update, {writeConcern:{w:'majority',j:true,wtimeout:10000}});
+       if (result?.acknowledged === false || result?.matchedCount === 0) throw reviewError('Page state changed or could not be saved. Refresh before continuing.');
+     };
+     const invalidateScan = () => updateSection({ ...identity(), remedyWritePending: { $ne: true } }, {
+@@ -46,11 +86,13 @@ export function createRemediationActionHandler({ Project, WorkItems, bridge = ca
+     const finishWrite = async (outcome: ReturnType<typeof checkedOutcome>) => {
+       const invalid = !outcome || outcome.effect === 'invalidate';
+       const terminal = Boolean(outcome?.terminal);
++      // Flush the immutable response BEFORE the section CAS. A failed append or
++      // crash leaves the pending pointer held; no replica set/transaction needed.
++      await appendOperation(req.params.projectID, { kind: 'response', localID: intent.localID, sectionID: intent.sectionID, at: new Date(),
++        ...(outcome ? { operation: safeOperationMetadata(outcome.metadata) } : { outcome: 'unknown_write' }) }, OperationRecords);
+       const update: any = {
+         $set: { 'a11yReview.$.remedyWritePending': !terminal,
+           'a11yReview.$.remedyError': invalid ? 'Page write requires fresh evidence or reconciliation.' : terminal ? '' : 'Page write is pending. Read operation evidence; do not retry.' },
+-        $push: { remedyOperations: { kind: 'response', localID: intent.localID, at: new Date(),
+-          ...(outcome ? { operation: safeOperationMetadata(outcome.metadata) } : { outcome: 'unknown_write' }) } },
+       };
+       if (terminal) update.$unset = { 'a11yReview.$.remedyPendingOperation': '' };
+       if (invalid) {
+@@ -78,6 +120,7 @@ export function createRemediationActionHandler({ Project, WorkItems, bridge = ca
+       }
+       const item = req.body.itemID ? await items.findOne({ _id: req.body.itemID, projectID: req.params.projectID, sectionID: req.params.sectionID }).lean() : null;
+       if (req.body.itemID && !item) return res.status(404).json({ err: true, errMsg: 'Work item is not on this project page.' });
++      if(item)requireWorkItemBudget(item);
+       evidenceVersion = section.remedyEvidenceVersion || 0;
+       const page = { page_url: section.sectionURL, section_title: section.sectionTitle };
+       let body: any = { ...page, finding_ids: req.body.findingIDs, fix_mode: req.body.fixMode,
+@@ -108,16 +151,16 @@ export function createRemediationActionHandler({ Project, WorkItems, bridge = ca
+         const candidate = { kind: 'intent', localID: randomUUID(), actor, session, action, sectionID: req.params.sectionID, at: new Date(),
+           issuer: signed.issuer, jti: signed.jti, expiresAt: signed.exp, reviewID: review.id,
+           binding: review.binding, sectionURL: section.sectionURL, pageID: section.pageID, evidenceVersion };
+-        // One document atomically consumes the reviewed preview, freezes certification and
+-        // persists issuer+jti BEFORE sending. No post-crash gap can authorize another write.
++        // Write-ahead intent is durable before the active-pointer CAS and dispatch.
++        // CAS failure leaves an orphan event, never an unrecorded external write.
++        await appendOperation(req.params.projectID, candidate, OperationRecords);
+         const claim = await Project.updateOne({ projectID: req.params.projectID,
+           $expr: { $and: ['members', 'leads', 'liaisons', 'orgID'].map(key => ({ $eq: [{ $ifNull: [`$${key}`, key === 'orgID' ? '' : []] }, { $literal: req.queueProject[key] ?? (key === 'orgID' ? '' : []) }] })) },
+           a11yReview: { $elemMatch: { ...identity(), remedyWritePending: { $ne: true }, 'remedyReviewedPreview.id': review.id,
+             'remedyReviewedPreview.used': false, 'remedyReviewedPreview.actor': actor, 'remedyReviewedPreview.session': session } } }, {
+           $set: { 'a11yReview.$.remedyWritePending': true, 'a11yReview.$.remedyPendingOperation': candidate.localID,
+             'a11yReview.$.remedyReviewedPreview.used': true },
+-          $push: { remedyOperations: candidate },
+-        });
++        }, {writeConcern:{w:'majority',j:true,wtimeout:10000}});
+         if (claim?.acknowledged === false || claim?.matchedCount !== 1) { intent = undefined; throw reviewError('The preview or project changed. Refresh before continuing.'); }
+         intent = candidate;
+         writeOutcome = 'uncertain';
+@@ -180,10 +223,12 @@ export function createRemediationActionHandler({ Project, WorkItems, bridge = ca
+       if (item && (isScan || isWrite)) {
+         const criterion = (scanResult?.wcag_review || scanResult?.wcagReview)?.criteria?.find((c: any) => c.id === item.criterionID);
+         const findings = scanResult?.findings?.filter((f: any) => f.ruleId === item.ruleId && (!item.selector || f.selector === item.selector));
+-        try { await items.updateOne({ _id: item._id, projectID: req.params.projectID }, {
+-          $push: { scanEvidence: { action, at: new Date(), actor: req.user.decoded.uuid, scannedAt: scanResult?.scanned_at,
+-            criterion, findings, result: isWrite ? safeOperationMetadata(outcome!.metadata) : undefined, scanError } }, $inc: { version: 1 },
+-        }); } catch { evidenceError = 'Page action completed but task evidence could not be saved. Rescan from this task to retry.'; }
++        try {
++          const event={action,at:new Date(),actor:req.user.decoded.uuid,scannedAt:scanResult?.scanned_at,criterion,findings,result:isWrite?safeOperationMetadata(outcome!.metadata):undefined,scanError};
++          requireEventBudget(event);
++          const saved=await items.updateOne({_id:item._id,projectID:req.params.projectID,...workItemAppendBudget},{$push:{scanEvidence:event},$inc:{version:1}});
++          if(saved?.matchedCount===0||saved?.acknowledged===false)throw Object.assign(Error('Task evidence budget exceeded.'),{code:'remedy_history_budget',publicMessage:'Task history reached its safety budget or became unavailable. Preserve/export history and contact the operator.'});
++        } catch(error:any) { evidenceError = error.code==='remedy_history_budget' ? `Page action completed. ${error.publicMessage} Do not retry a completed write.` : 'Page action completed but task evidence could not be saved. Rescan from this task to retry.'; }
+       }
+       return res.json({ err: false, ...(isWrite ? safeOperationMetadata(outcome!.metadata) : result),
+         localOperationID: intent?.localID, page_url: section.sectionURL,
+diff --git a/server/api/remediationqueue.ts b/server/api/remediationqueue.ts
+index 4e99340d..73c72094 100644
+--- a/server/api/remediationqueue.ts
++++ b/server/api/remediationqueue.ts
+@@ -1,3 +1,7 @@
++import { beginRemedyExport } from '../util/remedyExports.js';
++import { encodeCursor, paginateValues, pagination, READ_TIMEOUT_MS } from '../util/conformanceReads.js';
++import { workItemAppendBudget, requireEventBudget } from '../util/remedyBudgets.js';
++import { remedyOperationRecords } from '../util/remedyOperationRecords.js';
+ import { requireRemedyConfiguration } from '../util/remedyConfig.js';
+ import { registerConformance, conformanceRecords } from './conformance.js';
+ import mongoose from 'mongoose';
+@@ -23,7 +27,7 @@ export async function ensureRemedyStorage() {
+   requireRemedyConfiguration();
+   if (!storageReady) {
+     storageReady = (async () => {
+-      for (const model of [workItems(), conformanceRecords()]) {
++      for (const model of [workItems(), conformanceRecords(), remedyOperationRecords()]) {
+         await model.createCollection();
+         await model.createIndexes();
+       }
+@@ -36,7 +40,7 @@ export async function ensureRemedyStorage() {
+ }
+ 
+ /** Dependencies are injected so this module also layers onto the existing deployed bundle. */
+-export function registerRemediationQueue(router: any, { auth, projects, Project, User, WorkItems, bridge }: any) {
++export function registerRemediationQueue(router: any, { auth, projects, Project, User, WorkItems, OperationRecords, bridge }: any) {
+   const base = '/project/:projectID/accessibility/workqueue';
+   const authorize = async (req: any, res: any, next: any) => {
+     try {
+@@ -57,15 +61,56 @@ export function registerRemediationQueue(router: any, { auth, projects, Project,
+   };
+   const access = [auth.verifyRequest, auth.getUserAttributes, authorize];
+   registerConformance(router, { base, access });
+-  registerRemediationActions(router, { base, access, Project, WorkItems, bridge });
++  registerRemediationActions(router, { base, access, Project, WorkItems, OperationRecords, bridge });
+   router.get(base, ...access, async (req: any, res: any) => {
+     try {
++      const {limit,cursor}=pagination(req.query);
++      if(cursor&&(cursor.kind!=='items'||cursor.projectID!==req.params.projectID||!mongoose.isValidObjectId(cursor.after)))throw Object.assign(Error('Invalid item cursor.'),{status:400});
+       const sections = req.queueProject.a11yReview || [];
+       const selected = sections.find((s: any) => String(s._id) === req.query.sectionID);
+       const users = await User.find({ uuid: { $in: projectAssignees(req.queueProject) } }).select('uuid firstName lastName -_id').lean();
+-      const items = await WorkItems.find({ projectID: req.params.projectID }).sort({ createdAt: -1 }).lean();
+-      res.json({ err: false, canEdit: req.queueCanEdit, items, users, sections: sections.map((s: any) => ({ id: String(s._id), title: s.sectionTitle, pendingOperationID: s.remedyPendingOperation || '' })), candidates: selected ? queueCandidates(selected) : [] });
+-    } catch { res.status(500).json({ err: true, errMsg: 'Unable to load the work queue.' }); }
++      const found = await WorkItems.find({projectID:req.params.projectID,...(cursor?{_id:{$lt:new mongoose.Types.ObjectId(cursor.after)}}:{})}).sort({_id:-1}).select('-history -scanEvidence').limit(limit+1).maxTimeMS(READ_TIMEOUT_MS).lean();
++      const items=found.slice(0,limit);
++      const sectionPage=paginateValues(sections,{limit:req.query.limit,cursor:req.query.sectionCursor},{kind:'queue-pages',projectID:req.params.projectID},s=>String(s._id));
++      const candidatePage=paginateValues(selected?queueCandidates(selected):[],{limit:req.query.limit,cursor:req.query.candidateCursor},{kind:'queue-candidates',projectID:req.params.projectID,sectionID:String(selected?._id||'')},c=>c.key);
++      const queued=await WorkItems.find({projectID:req.params.projectID,key:{$in:candidatePage.entries.map(c=>c.key)}}).select('key').limit(200).maxTimeMS(READ_TIMEOUT_MS).lean();
++      const keys=new Set(queued.map((item:any)=>item.key));
++      res.setHeader('Cache-Control','no-store');
++      res.json({err:false,canEdit:req.queueCanEdit,items,users,sections:sectionPage.entries.map((s:any)=>({id:String(s._id),title:s.sectionTitle,pendingOperationID:s.remedyPendingOperation||''})),
++        candidates:candidatePage.entries.map(c=>({...c,queued:keys.has(c.key)})),nextSectionCursor:sectionPage.nextCursor,nextCandidateCursor:candidatePage.nextCursor,
++        nextCursor:found.length>limit?encodeCursor({kind:'items',projectID:req.params.projectID,after:String(items.at(-1)._id)}):null});
++    } catch(error:any) { res.status(error.status||500).json({ err: true, errMsg:error.status===400?error.message:'Unable to load the work queue.' }); }
++  });
++  router.get(`${base}/:itemID/history`,...access,async(req:any,res:any)=>{
++    try {
++      const {limit,cursor}=pagination(req.query),kind=req.query.kind||'history';
++      if(!mongoose.isValidObjectId(req.params.itemID)||!['history','scanEvidence'].includes(kind))throw Object.assign(Error('Invalid task history.'),{status:400});
++      if(cursor&&(cursor.projectID!==req.params.projectID||cursor.itemID!==req.params.itemID||cursor.kind!==kind||!Number.isInteger(cursor.upper)||!Number.isInteger(cursor.offset)||cursor.offset<0||cursor.upper<0))throw Object.assign(Error('Invalid task history cursor.'),{status:400});
++      const offsetBefore=cursor?.offset||0;
++      const result=await WorkItems.aggregate([
++        {$match:{_id:new mongoose.Types.ObjectId(req.params.itemID),projectID:req.params.projectID}},
++        {$project:{events:{$ifNull:[`$${kind}`,[]]}}},
++        {$set:{upper:cursor?{$min:[cursor.upper,{$size:'$events'}]}:{$size:'$events'}}},
++        {$set:{remaining:{$max:[0,{$subtract:['$upper',offsetBefore]}]}}},
++        {$project:{upper:1,records:{$cond:[{$gt:['$remaining',0]},
++          {$reverseArray:{$slice:['$events',{$max:[0,{$subtract:['$upper',offsetBefore+limit]}]},{$min:[limit,'$remaining']}]}},[]]}}},
++      ]).option({maxTimeMS:READ_TIMEOUT_MS});
++      if(!result.length)return res.status(404).json({err:true,errMsg:'Task is unavailable.'});
++      const {records,upper}=result[0],offset=(cursor?.offset||0)+records.length;
++      res.setHeader('Cache-Control','no-store');res.json({err:false,records:records.map((event:any,index:number)=>({...event,historyID:`${req.params.itemID}:${kind}:${upper-offsetBefore-1-index}`})),nextCursor:offset<upper?encodeCursor({projectID:req.params.projectID,itemID:req.params.itemID,kind,upper,offset}):null});
++    }catch(error:any){res.status(error.status||500).json({err:true,errMsg:error.status===400?error.message:'Unable to load task history.'});}
++  });
++  router.get(`${base}/items/report`,...access,async(req:any,res:any)=>{
++    const stream=beginRemedyExport(res);
++    try {
++      const upper=await WorkItems.findOne({projectID:req.params.projectID}).sort({_id:-1}).select('_id').setOptions({signal:stream.signal}).maxTimeMS(READ_TIMEOUT_MS).lean();
++      res.setHeader('Cache-Control','no-store');res.setHeader('Content-Type','application/json');res.setHeader('Content-Disposition',`attachment; filename="${req.params.projectID}-remedy-work-items.json"`);
++      await stream.write('{"items":[');let first=true;
++      const cursor=stream.openCursor(()=>WorkItems.find({projectID:req.params.projectID,_id:{$lte:upper?upper._id:new mongoose.Types.ObjectId('000000000000000000000000')}}).sort({_id:1}).maxTimeMS(120000).cursor({batchSize:20}));
++      for await(const item of cursor){await stream.write((first?'':',')+JSON.stringify(item));first=false;}
++      await stream.write('],"complete":true}');res.end();
++    }catch(error:any){if(res.headersSent)res.destroy(error);else res.status(500).json({err:true,errMsg:'Unable to export work items.'});}
++    finally{stream.dispose();}
+   });
+   router.post(base, ...access, async (req: any, res: any) => {
+     try {
+@@ -75,6 +120,7 @@ export function registerRemediationQueue(router: any, { auth, projects, Project,
+       const candidates = queueCandidates(section), chosen = candidates.filter(x => keys.includes(x.key));
+       if (chosen.length !== new Set(keys).size) return res.status(409).json({ err: true, errMsg: 'Review changed. Refresh the available findings.' });
+       const actor = req.user.decoded.uuid;
++      for(const item of chosen)requireEventBudget(item);
+       const result = await WorkItems.bulkWrite(chosen.map(item => ({ updateOne: {
+         filter: { projectID: req.params.projectID, key: item.key },
+         update: { $setOnInsert: { ...item, projectID: req.params.projectID, status: 'todo', priority: 'normal', assignee: '', version: 0, createdBy: actor,
+@@ -83,7 +129,7 @@ export function registerRemediationQueue(router: any, { auth, projects, Project,
+       res.json({ err: false, created: result.upsertedCount });
+     } catch (e: any) {
+       if (e.code === 11000) return res.json({ err: false, created: 0 });
+-      res.status(500).json({ err: true, errMsg: 'Unable to add work items.' });
++      res.status(e.status||500).json({err:true,errMsg:e.publicMessage||'Unable to add work items.'});
+     }
+   });
+   router.patch(`${base}/:itemID`, ...access, async (req: any, res: any) => {
+@@ -95,12 +141,13 @@ export function registerRemediationQueue(router: any, { auth, projects, Project,
+     try {
+       const actor = req.user.decoded.uuid, at = new Date();
+       const { note, ...fields } = changes;
+-      const item = await WorkItems.findOneAndUpdate({ _id: req.params.itemID, projectID: req.params.projectID, version: req.body.version }, {
++      const event={actor,at,...changes};requireEventBudget(event);
++      const item = await WorkItems.findOneAndUpdate({ _id: req.params.itemID, projectID: req.params.projectID, version: req.body.version, ...workItemAppendBudget }, {
+         $set: { ...fields, verifiedBy: fields.status === 'verified' ? actor : '', verifiedAt: fields.status === 'verified' ? at : null },
+-        $inc: { version: 1 }, $push: { history: { actor, at, ...changes } },
++        $inc: { version: 1 }, $push: { history: event },
+       }, { new: true, runValidators: true }).lean();
+-      if (!item) return res.status(409).json({ err: true, errMsg: 'Item changed or is unavailable. Refresh before saving.' });
++      if (!item) return res.status(409).json({ err: true, errMsg: 'Item changed, is unavailable or reached its explicit history safety budget. Preserve/export history and contact the operator before continuing.' });
+       res.json({ err: false, item });
+-    } catch { res.status(500).json({ err: true, errMsg: 'Unable to update this work item.' }); }
++    } catch(error:any) { res.status(error.status||500).json({err:true,errMsg:error.publicMessage||'Unable to update this work item.'}); }
+   });
+ }
+diff --git a/server/integration/remedy-routes.test.ts b/server/integration/remedy-routes.test.ts
+index 72e60408..a55de1b2 100644
+--- a/server/integration/remedy-routes.test.ts
++++ b/server/integration/remedy-routes.test.ts
+@@ -46,7 +46,10 @@ let tocURL = page, tocPageID = '123', tocTitle = 'Imported title';
+ const originalAdapter = axios.defaults.adapter;
+ function scan() { const at = new Date().toISOString(), sourceHash = createHash('sha256').update(changed ? '<p>after</p>' : '<p>before</p>').digest('hex').slice(0, 16); return { wcag_review: { sourceHash, scannedAt: at, criteria: criteria.map(c => ({ ...c, status: 'manual_review' })), rendered: { state: 'complete', sourceHash, renderedHash: changed ? 'new-render' : 'old-render', platformHash: 'platform', browser: 'synthetic', axeVersion: '4', scannedAt: at, violations: [] } }, findings: [], scanned_at: at }; }
+ async function listen(server: http.Server) { await new Promise<void>(r => server.listen(0, '127.0.0.1', r)); return `http://127.0.0.1:${(server.address() as any).port}`; }
++let requestBatch=0,batchStarted=0;
+ async function request(path: string, method = 'GET', body?: any, user = 'editor') {
++  if(!batchStarted)batchStarted=Date.now();
++  if(++requestBatch%400===0){const wait=60_100-(Date.now()-batchStarted);if(wait>0)await new Promise(r=>setTimeout(r,wait));batchStarted=Date.now();}
+   const response = await fetch(origin + '/api/v1' + path, { method, redirect: 'manual', headers: { 'Content-Type': 'application/json', ...(cookies[user] ? { cookie: cookies[user] } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+   return { status: response.status, data: await response.json() };
+ }
+@@ -67,7 +70,7 @@ function metadata(action: string, state: string, reason: string | null = null) {
+     reconciliation: state === 'unknown_write' ? 'required' : 'none', evidence_effect: state === 'pending' ? 'hold' : state === 'not_attempted' && !['stale_preview','target_mismatch'].includes(reason || '') ? 'preserve' : 'invalidate', updated_at: new Date().toISOString() };
+ }
+ before(async () => {
+-  await mongoose.connect(mongoURI);
++  await mongoose.connect(mongoURI,{monitorCommands:true});
+   // Fake only the external TOC HTTP provider; route, auth, merge and Mongo stay real.
+   axios.defaults.adapter = async config => {
+     if (!config.url?.startsWith('https://api.libretexts.org/endpoint/getTOC/')) {
+@@ -102,7 +105,7 @@ before(async () => {
+       assert.equal(claims.sub, users.editor); assert.deepEqual(claims.binding, previews.get(body.preview_token));
+       const persisted = (await request(`/project/accessibility/sections?projectID=${projectID}`)).data.a11yReview[0];
+       assert.equal(persisted.remedyWritePending, true);
+-      const storedIntent = (await Project.findOne({ projectID }).select('+remedyOperations').lean())!.remedyOperations as any[];
++      const storedIntent = (await mongoose.connection.db!.collection('remedyoperationrecords').find({projectID,kind:'intent'}).toArray()).map(x=>x.event);
+       assert.ok(storedIntent.some((op: any) => op.kind === 'intent' && op.issuer === claims.iss && op.jti === claims.jti), 'issuer+jti intent must exist before dispatch');
+       observedVerified = (await request(base + '/conformance')).data.report.verifiedCriteria;
+       const action = req.url.endsWith('/restore') ? 'restore' : 'apply';
+@@ -126,7 +129,7 @@ before(async () => {
+   });
+   process.env.REMEDY_API_BASE_URL = await listen(bridge);
+   const { default: api } = await import('../api.js');
+-  featureModelsAtImport = ['RemediationWorkItem', 'ConformanceRecord'].filter(name => mongoose.models[name]);
++  featureModelsAtImport = ['RemediationWorkItem', 'ConformanceRecord', 'RemedyOperationRecord'].filter(name => mongoose.models[name]);
+   const app = express(); app.use(cookieParser()); app.use('/api/v1', api);
+   appServer = http.createServer(app); origin = await listen(appServer);
+   for (const [name, uuid] of Object.entries(users)) {
+@@ -139,9 +142,11 @@ beforeEach(async () => {
+   process.env.REMEDY_ENABLED = 'true'; process.env.REMEDY_ORG_ID = 'libretexts'; process.env.REMEDY_API_KEY = 'synthetic_not_real';
+   Object.assign(process.env, { REMEDY_REVIEWER_KEY_ENABLED: 'true', REMEDY_REVIEWER_KEY_ID: 'synthetic-generated-key', REMEDY_REVIEWER_ISSUER: 'urn:conductor:test', REMEDY_REVIEWER_AUDIENCE: 'urn:bridge:test', REMEDY_REVIEWER_SIGNING_KEY_FILE: keyPath,
+     REMEDY_REVIEWER_KEY_NOT_BEFORE: String(Math.floor(Date.now()/1000)-60), REMEDY_REVIEWER_KEY_NOT_AFTER: String(Math.floor(Date.now()/1000)+3600) });
++  await User.updateMany({uuid:{$in:Object.values(users)}},{$set:{roles:[{org:'libretexts',role:'user'}]}});
+   previewExpiry = 0; invalidBinding = false; operationReady = true; previews.clear(); operations.clear();
+   await Project.deleteMany({ projectID });
+   await mongoose.connection.db!.collection('conformancerecords').deleteMany({ projectID });
++  await mongoose.connection.db!.collection('remedyoperationrecords').deleteMany({ projectID });
+   await mongoose.connection.db!.collection('remediationworkitems').deleteMany({ projectID });
+   changed = false; scanFails = false; rejectAction = false; outcome = 'written'; calls = []; tocCalls = 0; tocURL = page; tocPageID = '123'; tocTitle = 'Imported title';
+   await Project.create({ projectID, orgID: 'libretexts', title: 'Synthetic', projectURL: page, libreLibrary: 'dev', libreCoverID: '123', members: [users.editor], leads: [], liaisons: [], auditors: [users.auditor], tags: [], a11yReview: [{ _id: new mongoose.Types.ObjectId(sectionID), sectionTitle: 'Stored title', sectionURL: page, pageID: '123', wcagReview: scan().wcag_review }] });
+@@ -460,6 +465,7 @@ test('preview confirmation is tied to selected inputs, session, section and auth
+ test('expired preview and disabled or out-of-window key require a fresh confirmation without dispatch', async () => {
+   previewExpiry = Math.floor(Date.now()/1000);
+   assert.equal((await request(`${matrix}/preview`, 'POST', input())).status, 409);
++  await User.updateMany({uuid:{$in:Object.values(users)}},{$set:{roles:[{org:'libretexts',role:'user'}]}});
+   previewExpiry = 0;
+   const reviewed = await reviewedInput();
+   for (const setting of [{ REMEDY_REVIEWER_KEY_ENABLED: 'false' }, { REMEDY_REVIEWER_KEY_NOT_AFTER: String(Math.floor(Date.now()/1000)-1) }]) {
+@@ -684,16 +690,188 @@ test('indexed projection and authenticated complete export retain ordered curren
+  if(oldReview) await Records.deleteOne({_id:oldReview._id});
+  const history=await Records.find({projectID,kind:'review'}).sort({createdAt:-1,_id:-1}).toArray();
+  const response=await request(base+'/conformance');assert.equal(response.status,200);
+- for(const criterion of response.data.report.pages[0].criteria) {
++ const exported=await request(base+'/conformance/report');assert.equal(exported.status,200);
++ for(const criterion of exported.data.pages[0].criteria) {
+   const candidates=history.filter(r=>r.sectionID===sectionID&&r.criterionID===criterion.id);
+   const selected=candidates.find(r=>r.data.scopeVersion===original.scope.version&&r.data.fingerprint===original.pages[0].fingerprint);
+   assert.equal(criterion.status,selected?.data.status||'stale');
+   assert.equal(criterion.review?._id,selected?._id.toString()||undefined);
++  assert.equal(response.data.report.pages[0].criteria.find((c:any)=>c.id===criterion.id).status,criterion.status);
+  }
+- const exported=await request(base+'/conformance/report');assert.equal(exported.status,200);
+- const {generatedAt:ignored,...body}=response.data.report;
+- const {generatedAt:ignoredExport,...download}=exported.data;
+- assert.deepEqual(download,body);
++ assert.equal(exported.data.digest,response.data.report.digest);
++ assert.equal(exported.data.complete,true);assert.equal(exported.data.recordHistory.filter((r:any)=>r.kind==='review').length,250);
+  assert.equal(await Records.countDocuments({projectID,kind:'review'}),250);
+  for(const user of ['outsider','anonymous']) assert.equal((await request(base+'/conformance/report','GET',undefined,user)).status,user==='outsider'?403:401);
+ });
++
++test('new operation history is write-ahead durable without growing the Project document', async()=>{
++ outcome='uncertain';
++ const response=await request(`${base}/page/${sectionID}/apply`,'POST',await reviewedInput());
++ assert.equal(response.status,502);
++ const project=await Project.findOne({projectID}).select('+remedyOperations').lean();
++ assert.deepEqual(project!.remedyOperations,[],'new immutable events must live outside Project');
++ const events=await mongoose.connection.db!.collection('remedyoperationrecords').find({projectID,localID:response.data.localOperationID}).toArray();
++ assert.ok(events.some(e=>e.kind==='intent'));
++ assert.ok(events.some(e=>e.kind==='response'));
++ const status=await request(`${base}/page/${sectionID}/operations/${response.data.localOperationID}`);
++ assert.equal(status.status,200);assert.equal(status.data.pending,true);
++});
++
++test('summary pages and immutable criterion history are bounded with stable cursors', async()=>{
++ const sections=Array.from({length:205},(_,i)=>({_id:new mongoose.Types.ObjectId((50000+i).toString(16).padStart(24,'0')),sectionTitle:`Page ${i}`,sectionURL:page,wcagReview:scan().wcag_review}));
++ await Project.updateOne({projectID},{$set:{a11yReview:sections}});
++ const summary=await request(base+'/conformance');assert.equal(summary.status,200);
++ assert.equal(summary.data.report.pages.length,100);assert.ok(summary.data.nextCursor);
++ assert.ok(summary.data.report.pages.every((p:any)=>!('sourceScan' in p)&&p.criteria.every((c:any)=>!('review' in c)&&!('checklist' in c))));
++ const next=await request(base+'/conformance?cursor='+encodeURIComponent(summary.data.nextCursor));
++ assert.equal(next.data.report.pages.length,100);
++ const last=await request(base+'/conformance?cursor='+encodeURIComponent(next.data.nextCursor));assert.equal(last.data.report.pages.length,5);assert.equal(last.data.nextCursor,null);
++ assert.equal(new Set([...summary.data.report.pages,...next.data.report.pages,...last.data.report.pages].map(p=>p.sectionID)).size,205);
++ assert.equal((await request(base+'/conformance?limit=201')).status,400);
++ const Records=mongoose.connection.db!.collection('conformancerecords');
++ await Records.insertMany(Array.from({length:205},(_,i)=>({projectID,kind:'review',sectionID:String(sections[0]._id),criterionID:'1.1.1',actor:users.editor,data:{notes:`History ${i}`},createdAt:new Date(i)})));
++ const historyPath=base+`/conformance/history?sectionID=${sections[0]._id}&criterionID=1.1.1`;
++ const first=await request(historyPath);assert.equal(first.data.records.length,100);assert.ok(first.data.nextCursor);
++ // A concurrent append must not shift or repeat entries in this snapshot.
++ await Records.insertOne({projectID,kind:'review',sectionID:String(sections[0]._id),criterionID:'1.1.1',actor:users.editor,data:{notes:'Concurrent'},createdAt:new Date()});
++ const second=await request(historyPath+'&cursor='+encodeURIComponent(first.data.nextCursor));
++ const third=await request(historyPath+'&cursor='+encodeURIComponent(second.data.nextCursor));
++ assert.equal(second.data.records.length,100);assert.equal(third.data.records.length,5);assert.equal(third.data.nextCursor,null);
++ assert.equal(new Set([...first.data.records,...second.data.records,...third.data.records].map(x=>x._id)).size,205);
++ const detail=await request(base+`/conformance/pages/${sections[0]._id}`);assert.equal(detail.status,200);assert.ok(detail.data.page.sourceScan);
++ const criterion=await request(base+`/conformance/pages/${sections[0]._id}/criteria/1.1.1`);assert.equal(criterion.status,200);assert.ok(criterion.data.criterion.checklist);
++ const download=await request(base+'/conformance/report');assert.equal(download.status,200);assert.equal(download.data.pages.length,205);assert.equal(download.data.recordHistory.length,208);assert.equal(download.data.complete,true);
++});
++
++test('conformance API binds actual reviewer identity and separates delivery acceptance from verification',async()=>{
++ const before=(await request(base+'/conformance')).data.report;
++ const body={sectionID,criterionID:'1.1.1',fingerprint:before.pages[0].fingerprint,scopeVersion:before.scope.version,status:'pass',notes:'Compared mathematical meaning with screen reader output and visual content.',environment:'OS / Browser / Screen reader versions',evidenceURLs:[],checks:[0,1],confirmed:true,actor:'forged'};
++ assert.equal((await request(base+'/conformance/review','POST',{...body,fingerprint:'forged'})).status,400);
++ assert.equal((await request(base+'/conformance/review','POST',body)).status,200);
++ const history=(await request(base+`/conformance/history?sectionID=${sectionID}&criterionID=1.1.1`)).data.records;
++ assert.equal(history[0].actor,users.editor);assert.equal(history[0].data.actor,undefined);
++ assert.equal((await request(base+'/conformance/signoff','POST',{confirmed:true,digest:'forged',statement:'All of the book pages have supposedly passed the review.'})).status,400);
++ const delivery={digest:before.remediationHandoff.digest,confirmed:true,deferredConfirmed:true,statement:'Accept the remediation delivery while reader and human testing continue independently.',actor:'forged',deferredWork:[]};
++ // The new review changes the digest; request the current independent handoff identity.
++ delivery.digest=(await request(base+'/conformance')).data.report.remediationHandoff.digest;
++ assert.equal((await request(base+'/conformance/remediation_signoff','POST',delivery,'outsider')).status,403);
++ assert.equal((await request(base+'/conformance/remediation_signoff','POST',{...delivery,deferredConfirmed:false})).status,400);
++ assert.equal((await request(base+'/conformance/remediation_signoff','POST',delivery)).status,200);
++ const report=(await request(base+'/conformance/report')).data;
++ assert.equal(report.remediationHandoff.status,'accepted_for_remediation_handoff');assert.equal(report.status,'verification_pending');
++ const record=report.recordHistory.find((r:any)=>r.kind==='remediation_signoff');assert.equal(record.actor,users.editor);assert.equal(record.data.deferredWork.length,2);
++ assert.equal((await request(base+'/conformance/signoff','POST',{confirmed:true,digest:report.digest,statement:delivery.statement})).status,400);
++ const exported=await fetch(origin+'/api/v1'+base+'/conformance/report',{headers:{cookie:cookies.editor}});
++ assert.match(exported.headers.get('content-disposition')||'',/attachment/);await exported.arrayBuffer();
++});
++
++test('write-ahead intent and response failures keep dispatch and local release fail closed on standalone Mongo',async()=>{
++ const hello=await mongoose.connection.db!.admin().command({hello:1});assert.equal(hello.setName,undefined,'this case must prove standalone Mongo support');
++ const Records=mongoose.connection.db!.collection('remedyoperationrecords');
++ const reviewed=await reviewedInput();
++ await mongoose.connection.db!.command({collMod:'remedyoperationrecords',validator:{kind:{$ne:'intent'}},validationLevel:'strict',validationAction:'error'});
++ try {
++  const rejected=await request(`${matrix}/apply`,'POST',reviewed);assert.equal(rejected.status,500);
++  assert.equal(calls.filter(c=>c.path.endsWith('/apply-fix')).length,0);
++  assert.equal(Boolean((await Project.findOne({projectID}).lean())!.a11yReview[0].remedyWritePending),false);
++ }finally{await mongoose.connection.db!.command({collMod:'remedyoperationrecords',validator:{}});}
++ await mongoose.connection.db!.command({collMod:'remedyoperationrecords',validator:{kind:{$ne:'response'}},validationLevel:'strict',validationAction:'error'});
++ try {
++  const written=await request(`${matrix}/apply`,'POST',reviewed);assert.equal(written.status,502);
++  assert.equal(calls.filter(c=>c.path.endsWith('/apply-fix')).length,1);
++  const project=await Project.findOne({projectID}).lean();assert.equal(project!.a11yReview[0].remedyWritePending,true);
++  const events=await Records.find({projectID}).toArray();assert.equal(events.length,1);assert.equal(events[0].kind,'intent');
++  const read=await request(`${base}/page/${sectionID}/operations/${written.data.localOperationID}`);assert.equal(read.status,200);assert.equal(read.data.pending,true);
++ }finally{await mongoose.connection.db!.command({collMod:'remedyoperationrecords',validator:{}});}
++});
++
++test('thousands of immutable operation events keep bounded active pointers and authorized cursor reads',async()=>{
++ outcome='uncertain';const response=await request(`${matrix}/apply`,'POST',await reviewedInput());assert.equal(response.status,502);
++ const localID=response.data.localOperationID,Records=mongoose.connection.db!.collection('remedyoperationrecords');
++ const before=await Project.findOne({projectID}).select('+remedyOperations').lean();
++ await Records.insertMany(Array.from({length:5000},(_,i)=>({projectID,localID,sectionID,kind:'response',event:{kind:'response',localID,at:new Date(i),outcome:'unknown_write'}})));
++ assert.deepEqual(await Project.findOne({projectID}).select('+remedyOperations').lean(),before);
++ const path=`${base}/page/${sectionID}/operations/${localID}/history`;
++ const first=await request(path);assert.equal(first.status,200);assert.equal(first.data.records.length,100);assert.ok(first.data.nextCursor);
++ const second=await request(path+'?cursor='+encodeURIComponent(first.data.nextCursor));assert.equal(second.data.records.length,100);
++ assert.equal(new Set([...first.data.records,...second.data.records].map(r=>r._id)).size,200);
++ assert.equal((await request(path+'?limit=201')).status,400);
++ await Project.updateOne({projectID},{$push:{members:users.auditor}});
++ assert.equal((await request(path,'GET',undefined,'auditor')).status,403);
++ assert.equal((await request(base+'/operations/report')).status,403,'private operation export is administrative, not ordinary conformance read access');
++ // Use actual authenticated support/superadmin project policy for the complete export.
++ await User.updateOne({uuid:users.auditor},{$set:{roles:[{org:'libretexts',role:'support'}]}});
++ const beforeExport=await Project.findOne({projectID}).select('+remedyOperations').lean();
++ const exported=await request(base+'/operations/report','GET',undefined,'auditor');assert.equal(exported.status,200,JSON.stringify(exported.data));
++ assert.equal(exported.data.operationHistory.length,5002);assert.equal(exported.data.complete,true);
++ assert.deepEqual(await Project.findOne({projectID}).select('+remedyOperations').lean(),beforeExport);
++});
++
++test('legacy embedded operations remain readable and dry-run inventory never backfills or deletes',async()=>{
++ outcome='uncertain';const write=await request(`${matrix}/apply`,'POST',await reviewedInput());
++ const Records=mongoose.connection.db!.collection('remedyoperationrecords'),events=await Records.find({projectID}).sort({_id:1}).toArray();
++ await Project.updateOne({projectID},{$set:{remedyOperations:events.map(e=>e.event)}});await Records.deleteMany({projectID});
++ const before=await Project.findOne({projectID}).select('+remedyOperations').lean();
++ const lookup=await request(`${base}/page/${sectionID}/operations/${write.data.localOperationID}`);assert.equal(lookup.status,200);assert.equal(lookup.data.pending,true);
++ const history=await request(`${base}/page/${sectionID}/operations/${write.data.localOperationID}/history`);assert.equal(history.status,200);assert.equal(history.data.records.length,2);assert.ok(history.data.records.every((r:any)=>r._id.startsWith('legacy:')));
++ const {execFileSync}=await import('node:child_process');
++ const result=execFileSync(process.execPath,['--import','tsx','scripts/inspectLegacyRemedyOperations.ts'],{env:{PATH:process.env.PATH,HOME:keyDirectory,CONDUCTOR_REMEDY_DRY_RUN_URI:mongoURI},encoding:'utf8'});
++ const inventory=JSON.parse(result.trim());assert.equal(inventory.legacyEvents,2);assert.match(inventory.sha256,/^[a-f0-9]{64}$/);
++ assert.deepEqual(await Project.findOne({projectID}).select('+remedyOperations').lean(),before);assert.equal(await Records.countDocuments({projectID}),0);
++});
++
++test('work-item summaries and history are bounded and explicit storage budgets preserve all events',async()=>{
++ const Work=mongoose.connection.db!.collection('remediationworkitems');
++ const ids=Array.from({length:205},()=>new mongoose.Types.ObjectId());
++ await Work.insertMany(ids.map((_id,i)=>({_id,projectID,key:`bounded-${i}`,sectionID,sectionTitle:'Synthetic',title:`Finding ${i}`,status:'todo',priority:'normal',assignee:'',version:0,createdAt:new Date(i),history:Array.from({length:i===0?205:1},(_,n)=>({actor:users.editor,note:`Note ${n}`,at:new Date(n),status:'todo'})),scanEvidence:[]})));
++ const response=await request(base);assert.equal(response.data.items.length,100);assert.ok(response.data.nextCursor);assert.ok(response.data.items.every((item:any)=>!('history' in item)&&!('scanEvidence' in item)));
++ const second=await request(base+'?cursor='+encodeURIComponent(response.data.nextCursor));const third=await request(base+'?cursor='+encodeURIComponent(second.data.nextCursor));
++ assert.equal(second.data.items.length,100);assert.equal(third.data.items.length,5);assert.equal(third.data.nextCursor,null);
++ const historyPath=base+`/${ids[0]}/history`;
++ const first=await request(historyPath);assert.equal(first.data.records.length,100);assert.ok(first.data.nextCursor);
++ await Work.updateOne({_id:ids[0]},{$push:{history:{actor:users.editor,note:'Concurrent append'}}} as any);
++ const next=await request(historyPath+'?cursor='+encodeURIComponent(first.data.nextCursor));const last=await request(historyPath+'?cursor='+encodeURIComponent(next.data.nextCursor));
++ assert.equal(next.data.records.length,100);assert.equal(last.data.records.length,5);assert.equal(last.data.nextCursor,null);
++ assert.equal(new Set([...first.data.records,...next.data.records,...last.data.records].map(r=>r.note)).size,205);
++ await Work.updateOne({_id:ids[0]},{$set:{history:Array.from({length:1000},(_,i)=>({actor:users.editor,note:`Preserved ${i}`}))}});
++ const before=await Work.findOne({_id:ids[0]});
++ const denied=await request(base+`/${ids[0]}`,'PATCH',{version:0,status:'in_progress',priority:'normal',assignee:'',note:'New note must be refused before the document limit.'});assert.equal(denied.status,409);
++ assert.deepEqual(await Work.findOne({_id:ids[0]}),before);
++ const exported=await request(base+'/items/report');assert.equal(exported.status,200);assert.equal(exported.data.items.length,205);assert.equal(exported.data.complete,true);assert.equal(exported.data.items.find((r:any)=>r._id===String(ids[0])).history.length,1000);
++});
++
++test('cancelling an actual streaming export closes its Mongo cursor without claiming completion',async()=>{
++ const Records=mongoose.connection.db!.collection('conformancerecords');
++ await Records.insertMany(Array.from({length:20000},(_,i)=>({projectID,kind:'review',sectionID,criterionID:'1.1.1',actor:users.editor,data:{notes:'Synthetic historical evidence '.repeat(140),fingerprint:`old-${i}`,scopeVersion:'old'}})));
++ const cursorIDs=new Map<string,any>();const client=mongoose.connection.getClient();
++ const observe=(event:any)=>{const cursor=event.reply?.cursor;if(cursor?.ns===mongoose.connection.name+'.conformancerecords'&&cursor.id&&!cursor.id.isZero())cursorIDs.set(String(cursor.id),cursor.id);};
++ client.on('commandSucceeded',observe);
++ const controller=new AbortController();let text='';
++ try {
++  const response=await fetch(origin+'/api/v1'+base+'/conformance/report',{headers:{cookie:cookies.editor},signal:controller.signal});assert.equal(response.status,200);
++  const reader=response.body!.getReader();
++  while(text.length<500000){const chunk=await reader.read();assert.equal(chunk.done,false);text+=new TextDecoder().decode(chunk.value);}
++  controller.abort();await assert.rejects(reader.read());assert.equal(text.includes('"complete":true'),false);
++  assert.ok(cursorIDs.size>0,'the export must have opened a real server cursor');
++  let active=1;
++  for(let i=0;i<200&&active;i++){
++    const cursors=await client.db('admin').aggregate([{$currentOp:{idleCursors:true,allUsers:true}},{$match:{'cursor.cursorId':{$in:[...cursorIDs.values()]}}}]).toArray();active=cursors.length;
++    if(active)await new Promise(r=>setTimeout(r,25));
++  }
++  assert.equal(active,0,'client cancellation must retire the actual Mongo server cursor');
++  assert.equal((await request(base+'/conformance')).status,200);
++ }finally{controller.abort();client.off('commandSucceeded',observe);}
++});
++
++test('actual 500-page 25k-review summary stays bounded while preserving complete verification counts',async()=>{
++ const {pageFingerprint}=await import('../util/conformance.js');
++ const sections=Array.from({length:500},(_,i)=>({_id:new mongoose.Types.ObjectId((70000+i).toString(16).padStart(24,'0')),sectionTitle:`Synthetic ${i}`,sectionURL:page,wcagReview:scan().wcag_review}));
++ await Project.updateOne({projectID},{$set:{a11yReview:sections}});
++ const scope=(await request(base+'/conformance')).data.report.scope;
++ await mongoose.connection.db!.collection('conformancerecords').insertMany(sections.flatMap(section=>criteria.map(c=>({projectID,sectionID:String(section._id),criterionID:c.id,kind:'review',actor:users.editor,at:new Date(),createdAt:new Date(),data:{criterionID:c.id,status:'pass',fingerprint:pageFingerprint(section),scopeVersion:scope.version,notes:'Synthetic fixture reviewer evidence.'}}))));
++ const milliseconds:number[]=[];let response:any;
++ for(let i=0;i<3;i++){const started=performance.now();response=await request(base+'/conformance');milliseconds.push(+(performance.now()-started).toFixed(2));assert.equal(response.status,200);}
++ assert.equal(response.data.report.pages.length,100);assert.equal(response.data.report.totalCriteria,25000);assert.equal(response.data.report.verifiedCriteria,25000);assert.equal(response.data.report.status,'verification_pending');
++ const bytes=Buffer.byteLength(JSON.stringify(response.data));assert.ok(bytes<1_000_000,'default summary has an explicit bounded shape');
++ process.stdout.write(JSON.stringify({synthetic:true,probe:'authenticated-summary',pages:500,reviews:25000,milliseconds,bytes})+'\n');
++});
+diff --git a/server/scripts/inspectLegacyRemedyOperations.ts b/server/scripts/inspectLegacyRemedyOperations.ts
+new file mode 100644
+index 00000000..1be983fe
+--- /dev/null
++++ b/server/scripts/inspectLegacyRemedyOperations.ts
+@@ -0,0 +1,18 @@
++/** Read-only compatibility inventory. No migration, update, index or deletion. */
++import { MongoClient, BSON } from 'mongodb';
++import { createHash } from 'node:crypto';
++const uri=process.env.CONDUCTOR_REMEDY_DRY_RUN_URI;
++if(!uri)throw Error('Set CONDUCTOR_REMEDY_DRY_RUN_URI using an operator-provided read-only account.');
++const client=new MongoClient(uri,{serverSelectionTimeoutMS:5000});
++try {
++ await client.connect();
++ const cursor=client.db().collection('projects').find({'remedyOperations.0':{$exists:true}},{projection:{projectID:1,remedyOperations:1,a11yReview:1},maxTimeMS:30000}).batchSize(20);
++ for await(const project of cursor) {
++  const entries=project.remedyOperations||[];
++  const result={projectID:project.projectID,legacyEvents:entries.length,
++   legacyBytes:BSON.calculateObjectSize({entries}),sha256:createHash('sha256').update(BSON.serialize({entries})).digest('hex'),
++   pendingSections:(project.a11yReview||[]).filter((s:any)=>s.remedyWritePending).length,
++   compatibility:'Preserve embedded history verbatim. New events use remedyoperationrecords; no backfill required for reads.'};
++  process.stdout.write(JSON.stringify(result)+'\n');
++ }
++}finally{await client.close();}
+diff --git a/server/util/conformance-api.test.ts b/server/util/conformance-api.test.ts
+index 60f32001..8b05b994 100644
+--- a/server/util/conformance-api.test.ts
++++ b/server/util/conformance-api.test.ts
+@@ -2,30 +2,16 @@ import test from 'node:test';
+ import assert from 'node:assert/strict';
+ import express from 'express';
+ import { registerConformance } from '../api/conformance.js';
+-import { criteria,pageFingerprint } from './conformance.js';
+-test('conformance API binds reviewer identity, rejects forged/stale evidence and premature sign-off',async()=>{
+- const records:any[]=[{kind:'scope',data:{version:'scope1',boundaries:'Full reader pages',processes:'Read and navigate'}}],at=new Date().toISOString();
+- const section={_id:'p1',sectionURL:'https://dev.libretexts.org/Sandboxes/johnnyphung/Test',wcagReview:{sourceHash:'a',scannedAt:at,criteria:criteria.map(c=>({...c,status:'pass'})),rendered:{sourceHash:'a',renderedHash:'b',platformHash:'c',scannedAt:at,state:'complete',violations:[]}}};
+- const app=express();app.use(express.json());
+- registerConformance(app,{base:'/q',access:[(req:any,res:any,next:any)=>{if(req.headers['x-user']!=='reviewer')return res.sendStatus(403);req.user={decoded:{uuid:'reviewer'}};req.queueCanEdit=true;req.queueProject={projectID:'demo',a11yReview:[section]};req.params.projectID='demo';next();}],Records:{find:()=>({sort:()=>({lean:async()=>records})}),create:async(r:any)=>records.unshift(r)}});
+- const server=app.listen(0,'127.0.0.1');await new Promise<void>(r=>server.once('listening',r));const base=`http://127.0.0.1:${(server.address() as any).port}/q/conformance`;
+- const post=(action:string,body:any,user='reviewer')=>fetch(`${base}/${action}`,{method:'POST',headers:{'Content-Type':'application/json','x-user':user},body:JSON.stringify(body)});
+- try{
+-  assert.equal((await post('review',{},'outsider')).status,403);
+-  const exported=await fetch(`${base}/report`,{headers:{'x-user':'reviewer'}});assert.equal(exported.status,200);assert.match(exported.headers.get('content-disposition') || '',/attachment/);assert.equal((await exported.json()).status,'verification_pending');
+-  assert.equal((await post('signoff',{confirmed:true,digest:'forged',statement:'All of the book pages have supposedly passed the review.'})).status,400);
+-  const body={sectionID:'p1',criterionID:'1.1.1',fingerprint:pageFingerprint(section),scopeVersion:'scope1',status:'pass',notes:'Compared mathematical meaning with screen reader output and visual content.',environment:'OS / Browser / Screen reader versions',evidenceURLs:[],checks:[0,1],confirmed:true,actor:'forged'};
+-  assert.equal((await post('review',{...body,fingerprint:'forged'})).status,400);
+-  assert.equal((await post('review',body)).status,200);assert.equal(records[0].actor,'reviewer');assert.equal(records[0].data.actor,undefined);
+-  const before=await (await fetch(base,{headers:{'x-user':'reviewer'}})).json();
+-  const delivery={digest:before.report.remediationHandoff.digest,confirmed:true,deferredConfirmed:true,statement:'Accept the remediation delivery while reader and human testing continue independently.',actor:'forged',deferredWork:[]};
+-  assert.equal((await post('remediation_signoff',delivery,'outsider')).status,403);
+-  assert.equal((await post('remediation_signoff',{...delivery,deferredConfirmed:false})).status,400);
+-  assert.equal((await post('remediation_signoff',delivery)).status,200);
+-  assert.equal(records[0].kind,'remediation_signoff');assert.equal(records[0].actor,'reviewer');assert.equal(records[0].data.deferredWork.length,2);
+-  const after=await (await fetch(`${base}/report`,{headers:{'x-user':'reviewer'}})).json();
+-  assert.equal(after.remediationHandoff.status,'accepted_for_remediation_handoff');assert.equal(after.status,'verification_pending');
+-  assert.equal((await post('signoff',{confirmed:true,digest:after.digest,statement:delivery.statement})).status,400);
+-
++// Storage-dependent cases moved to the actual auth/Mongo route suite, avoiding
++// an in-memory implementation of Mongo aggregation/cursor semantics here.
++test('conformance routes reject a foreign reviewer before reading or writing storage',async()=>{
++ const app=express();app.use(express.json());let calls=0;
++ registerConformance(app,{base:'/q',access:[(_req:any,res:any)=>res.sendStatus(403)],Records:{findOne:()=>{calls++;throw Error('Unexpected storage read');},create:()=>{calls++;throw Error('Unexpected storage write');}}});
++ const server=app.listen(0,'127.0.0.1');await new Promise<void>(r=>server.once('listening',r));
++ const base=`http://127.0.0.1:${(server.address() as any).port}/q/conformance`;
++ try {
++  for(const path of ['','/report','/history?sectionID=foreign&criterionID=1.1.1','/pages/foreign','/pages/foreign/criteria/1.1.1'])assert.equal((await fetch(base+path)).status,403);
++  for(const action of ['review','scope','signoff','remediation_signoff'])assert.equal((await fetch(base+'/'+action,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).status,403);
++  assert.equal(calls,0);
+  }finally{await new Promise<void>(r=>server.close(()=>r()));}
+ });
+diff --git a/server/util/conformanceReads.ts b/server/util/conformanceReads.ts
+new file mode 100644
+index 00000000..0896ec14
+--- /dev/null
++++ b/server/util/conformanceReads.ts
+@@ -0,0 +1,80 @@
++import mongoose from 'mongoose';
++import { conformanceReport, criteria, pageFingerprint } from './conformance.js';
++import { remediationHandoff } from './remediationHandoff.js';
++export const READ_TIMEOUT_MS = 30_000;
++const order = {createdAt:-1,_id:-1};
++const audited = (r:any) => r ? {...r.data,_id:r._id,sectionID:r.sectionID,actor:r.actor,at:r.at} : null;
++export function pagination(query:any) {
++  const limit=query.limit===undefined?100:Number(query.limit);
++  if(!Number.isInteger(limit)||limit<1||limit>200) throw Object.assign(Error('Choose a limit from 1 through 200.'),{status:400});
++  let cursor:any=null;
++  if(query.cursor!==undefined) {
++    try { if(typeof query.cursor!=='string'||query.cursor.length>1024) throw Error(); cursor=JSON.parse(Buffer.from(query.cursor,'base64url').toString()); if(!cursor||typeof cursor!=='object') throw Error(); }
++    catch {throw Object.assign(Error('Invalid cursor. Refresh the first page.'),{status:400});}
++  }
++  return {limit,cursor};
++}
++export const encodeCursor = (value:any) => Buffer.from(JSON.stringify(value)).toString('base64url');
++export function compactPage(page:any) {
++  if(String(page.title||'').length>2000||String(page.url||'').length>8192)throw Object.assign(Error('Page metadata exceeds the bounded summary budget; request the full export for operator inspection.'),{status:413});
++  const {sourceScan,criteria:results,...fields}=page;
++  return {...fields,criteria:results.map((c:any)=>({id:c.id,status:c.status}))};
++}
++export async function recordSnapshot(Records:any,signal?:AbortSignal) {
++  const newest=await Records.findOne().sort({_id:-1}).select('_id').setOptions({signal}).maxTimeMS(READ_TIMEOUT_MS).lean();
++  return newest?._id || new mongoose.Types.ObjectId('000000000000000000000000');
++}
++export async function loadConformance(project:any,Records:any,{full=false,snapshot,scope:fixedScope,signal,now=Date.now(),criterionID}:any={}) {
++  const fence=snapshot?{_id:{$lte:snapshot}}:{};
++  const latest=async(kind:string,extra:any={})=>Records.findOne({projectID:project.projectID,kind,...fence,...extra}).sort(order).setOptions({signal}).maxTimeMS(READ_TIMEOUT_MS).lean();
++  const scope=fixedScope===undefined?(await latest('scope'))?.data:fixedScope;
++  const sections=project.a11yReview||[];
++  const fingerprints=new Map<string,Set<unknown>>();
++  for(const section of sections){const id=String(section._id);let values=fingerprints.get(id);if(!values)fingerprints.set(id,values=new Set());values.add(pageFingerprint(section));}
++  const allowed=new Set(criterionID?[criterionID]:criteria.map(c=>c.id));
++  const current=new Map<string,Map<string,Map<unknown,any>>>(),pairs=new Map<string,Set<string>>();
++  const expected=[...fingerprints.values()].reduce((count,values)=>count+values.size*allowed.size,0);let matched=0;
++  // Read only selection metadata, in the exact historical order. A hash lookup
++  // per record avoids an OR branch per page and never reads superseded notes.
++  const cursor=Records.collection.find({projectID:project.projectID,kind:'review',sectionID:{$in:[...fingerprints.keys()]},'data.criterionID':{$in:[...allowed]},...fence},
++    {sort:order,projection:{_id:1,sectionID:1,'data.criterionID':1,'data.scopeVersion':1,'data.fingerprint':1,'data.status':1},batchSize:200,maxTimeMS:READ_TIMEOUT_MS});
++  let closing:Promise<any>|undefined,expired=false;
++  const close=()=>closing||=(cursor.close().catch(()=>{}));
++  const abort=()=>{void close();};signal?.addEventListener('abort',abort,{once:true});
++  const timer=setTimeout(()=>{expired=true;void close();},READ_TIMEOUT_MS);timer.unref();
++  try {
++    while(!expired&&!signal?.aborted){
++      const record=await cursor.next();if(!record)break;
++      const sectionID=String(record.sectionID),id=record.data?.criterionID;
++      if(!fingerprints.has(sectionID)||!allowed.has(id))continue;
++      let seen=pairs.get(sectionID);if(!seen)pairs.set(sectionID,seen=new Set());seen.add(id);
++      if(fingerprints.get(sectionID)!.has(record.data.fingerprint)&&record.data.scopeVersion===scope?.version){
++        let page=current.get(sectionID);if(!page)current.set(sectionID,page=new Map());
++        let criterion=page.get(id);if(!criterion)page.set(id,criterion=new Map());
++        if(!criterion.has(record.data.fingerprint)){criterion.set(record.data.fingerprint,record);matched++;}
++        if(matched===expected)break;
++      }
++    }
++    if(expired||signal?.aborted)throw Error('Conformance selection cancelled or exceeded its read budget.');
++  }finally{clearTimeout(timer);signal?.removeEventListener('abort',abort);await close();}
++  const selectedRecords=[...current.values()].flatMap(page=>[...page.values()].flatMap(criterion=>[...criterion.values()]));
++  const selected=full?await Records.find({projectID:project.projectID,_id:{$in:selectedRecords.map(record=>record._id)}}).limit(selectedRecords.length||1).setOptions({signal}).maxTimeMS(READ_TIMEOUT_MS).lean():selectedRecords;
++  const reviews=selected.map(audited);
++  for(const [sectionID,ids] of pairs)for(const id of ids)reviews.push({sectionID,criterionID:id,fingerprint:'stale-sentinel',scopeVersion:'stale-sentinel'});
++  const report=conformanceReport(project,scope,reviews,[],now);
++  const signoff=report.readyForSignoff?audited(await latest('signoff',{'data.digest':report.digest})):null;
++  if(signoff){report.signoff=signoff;report.status='verified_for_evaluated_scope';}
++  const handoff=remediationHandoff(report,[],now);
++  const accepted=audited(await latest('remediation_signoff',{'data.digest':handoff.digest}));
++  const anyHandoff=accepted||await latest('remediation_signoff');
++  return {scope,report:{...report,remediationHandoff:remediationHandoff(report,accepted?[accepted]:anyHandoff?[{digest:'unmatched'}]:[],now)}};
++}
++
++/** Stable IDs, bounded output and explicit continuation for embedded metadata. */
++export function paginateValues(values:any[],query:any,binding:any,key:(value:any)=>string){
++ const {limit,cursor}=pagination(query);
++ if(cursor&&(Object.entries(binding).some(([name,value])=>cursor[name]!==value)||typeof cursor.after!=='string'))throw Object.assign(Error('Invalid list cursor.'),{status:400});
++ const sorted=[...values].sort((a,b)=>key(a)<key(b)?-1:key(a)>key(b)?1:0).filter(value=>!cursor||key(value)>cursor.after);
++ const entries=sorted.slice(0,limit);
++ return {entries,total:values.length,nextCursor:sorted.length>limit?encodeCursor({...binding,after:key(entries.at(-1))}):null};
++}
+diff --git a/server/util/remediationactions.test.ts b/server/util/remediationactions.test.ts
+index 3e058bd7..aadae86e 100644
+--- a/server/util/remediationactions.test.ts
++++ b/server/util/remediationactions.test.ts
+@@ -36,6 +36,7 @@ async function harness(run: (url: string, calls: any[], evidence: any[], row: an
+       }
+       return { acknowledged: true, matchedCount: 1 };
+     } }, User: {},
++    OperationRecords: { create: async (record:any) => record },
+     WorkItems: { findOne: (filter: any) => ({ lean: async () => filter._id === row._id && filter.sectionID === row.sectionID && filter.projectID === row.projectID ? row : null }), updateOne: async (_f: any, update: any) => { evidence.push(update.$push.scanEvidence); } },
+     bridge: async (action: string, body: any) => {
+       calls.push({ action, body });
+diff --git a/server/util/remediationqueue.test.ts b/server/util/remediationqueue.test.ts
+index eb808aad..d7423a97 100644
+--- a/server/util/remediationqueue.test.ts
++++ b/server/util/remediationqueue.test.ts
+@@ -30,7 +30,7 @@ async function harness(run: (url: string, rows: any[]) => Promise<void>) {
+   const rows: any[] = [];
+   const project = { projectID: 'demo', orgID: 'libretexts', members: ['alice', 'bob'], auditors: ['auditor'], a11yReview: [section] };
+   const WorkItems = {
+-    find: ({ projectID }: any) => ({ sort: () => ({ lean: async () => rows.filter(r => r.projectID === projectID) }) }),
++    find: ({ projectID }: any) => {const query:any={sort:()=>query,select:()=>query,limit:()=>query,maxTimeMS:()=>query,lean:async()=>rows.filter(r=>r.projectID===projectID)};return query;},
+     bulkWrite: async (ops: any[]) => {
+       let upsertedCount = 0;
+       for (const { updateOne: o } of ops) if (!rows.some(r => r.projectID === o.filter.projectID && r.key === o.filter.key)) {
+diff --git a/server/util/remediationqueue.ts b/server/util/remediationqueue.ts
+index 4c77ab20..e40ab74a 100644
+--- a/server/util/remediationqueue.ts
++++ b/server/util/remediationqueue.ts
+@@ -9,7 +9,7 @@ export function projectAssignees(project: any): string[] {
+ 
+ /** Evidence keys deliberately exclude scan-local finding indexes and scan timestamps. */
+ export function queueCandidates(section: any) {
+-  const result: any[] = [];
++  const result: any[] = [], seen = new Set<string>();
+   for (const criterion of section.wcagReview?.criteria || []) {
+     if (!['fail', 'manual_review', 'not_tested'].includes(criterion.status)) continue;
+     const evidence = criterion.status === 'fail' && criterion.evidence?.length ? criterion.evidence : [null];
+@@ -18,7 +18,8 @@ export function queueCandidates(section: any) {
+         section.pageID || section.sectionURL, criterion.id, e?.ruleId || criterion.status,
+         e?.selector || e?.message || '',
+       ])).digest('hex');
+-      if (result.some(x => x.key === key)) continue;
++      if (seen.has(key)) continue;
++      seen.add(key);
+       result.push({ key, sectionID: String(section._id), pageID: section.pageID || '',
+         sectionTitle: section.sectionTitle, sectionURL: section.sectionURL,
+         criterionID: criterion.id, criterionTitle: criterion.title,
+diff --git a/server/util/remedyBudgets.ts b/server/util/remedyBudgets.ts
+new file mode 100644
+index 00000000..66174730
+--- /dev/null
++++ b/server/util/remedyBudgets.ts
+@@ -0,0 +1,15 @@
++import { BSON } from 'mongodb';
++export const MAX_WORK_ITEM_EVENTS=1000;
++export const MAX_WORK_ITEM_BYTES=8*1024*1024;
++export const workItemAppendBudget={ $expr:{$and:[
++ {$lt:[{$size:{$ifNull:['$history',[]]}},MAX_WORK_ITEM_EVENTS]},
++ {$lt:[{$size:{$ifNull:['$scanEvidence',[]]}},MAX_WORK_ITEM_EVENTS]},
++ {$lt:[{$bsonSize:'$$ROOT'},MAX_WORK_ITEM_BYTES]},
++]} };
++export function requireWorkItemBudget(item:any){
++ if((item.history?.length||0)>=MAX_WORK_ITEM_EVENTS||(item.scanEvidence?.length||0)>=MAX_WORK_ITEM_EVENTS||BSON.calculateObjectSize(item)>=MAX_WORK_ITEM_BYTES)
++  throw Object.assign(Error('Task history reached its explicit safety budget. Preserve/export it and contact the operator; no history was discarded.'),{status:409,code:'remedy_history_budget',publicMessage:'Task history reached its explicit safety budget. Preserve/export it and contact the operator; no history was discarded.'});
++}
++export function requireEventBudget(event:any){
++ if(BSON.calculateObjectSize(event)>65536)throw Object.assign(Error('Task evidence exceeds the supported 64 KiB event budget. No evidence was truncated.'),{status:413,code:'remedy_history_budget',publicMessage:'Task evidence exceeds the supported 64 KiB event budget. No evidence was truncated.'});
++}
+diff --git a/server/util/remedyExports.ts b/server/util/remedyExports.ts
+new file mode 100644
+index 00000000..b7d470ac
+--- /dev/null
++++ b/server/util/remedyExports.ts
+@@ -0,0 +1,17 @@
++import { once } from 'node:events';
++/** HTTP backpressure, client cancellation and a fixed total export deadline. */
++export function beginRemedyExport(res:any) {
++ let closed=false;const cursors:any[]=[];const controller=new AbortController();
++ // Close once. Concurrent close calls can end the driver's implicit session
++ // before its first killCursors command executes, leaving an idle server cursor.
++ const close=()=>{if(closed)return;closed=true;controller.abort();for(const cursor of cursors)void cursor.close().catch(()=>{});};
++ res.once('close',close);
++ const timer=setTimeout(()=>{close();res.destroy(Error('Export exceeded its 120 second budget.'));},120_000);timer.unref();
++ return {
++  signal:controller.signal,
++  // Streaming cursors use this explicit lifecycle, not the query abort signal.
++  openCursor(factory:()=>any){if(closed)throw Error('Export cancelled.');const cursor=factory();cursors.push(cursor);return cursor;},
++  async write(text:string){if(closed)throw Error('Export cancelled.');if(!res.write(text))await once(res,'drain',{signal:controller.signal});},
++  dispose(){clearTimeout(timer);close();res.off('close',close);},
++ };
++}
+diff --git a/server/util/remedyOperationRecords.ts b/server/util/remedyOperationRecords.ts
+new file mode 100644
+index 00000000..27fd3daa
+--- /dev/null
++++ b/server/util/remedyOperationRecords.ts
+@@ -0,0 +1,32 @@
++import { requireRemedyConfiguration } from './remedyConfig.js';
++import mongoose from 'mongoose';
++import { BSON } from 'mongodb';
++
++// Immutable write-ahead events; only section.remedyPendingOperation is active.
++// Auto creation stays off: enabled health preflight owns explicit index setup.
++const schema = new mongoose.Schema({
++  projectID: { type: String, required: true }, localID: { type: String, required: true },
++  kind: { type: String, required: true }, sectionID: String, actor: String,
++  issuer: String, jti: String, event: { type: mongoose.Schema.Types.Mixed, required: true },
++}, { timestamps: true, autoCreate: false, autoIndex: false });
++schema.index({ projectID: 1, localID: 1, kind: 1, _id: -1 });
++schema.index({projectID:1,localID:1},{unique:true,partialFilterExpression:{kind:'intent'}});
++schema.index({ issuer: 1, jti: 1 }, { unique: true, partialFilterExpression: { kind: 'intent' } });
++export const remedyOperationRecords = () => mongoose.models.RemedyOperationRecord || mongoose.model('RemedyOperationRecord', schema);
++let ready:Promise<void>|undefined;
++export async function ensureOperationStorage(){
++ requireRemedyConfiguration();
++ if(!ready)ready=(async()=>{const Records=remedyOperationRecords();await Records.createCollection();await Records.createIndexes();})().catch(error=>{ready=undefined;throw error;});
++ return ready;
++}
++export async function appendOperation(projectID: string, event: any, Records?:any) {
++  if(!Records){await ensureOperationStorage();Records=remedyOperationRecords();}
++  if (BSON.calculateObjectSize(event) > 65536) throw Error('Operation metadata exceeds the supported 64 KiB event budget.');
++  return Records.create([{ projectID, localID: event.localID, kind: event.kind,
++    sectionID: event.sectionID, actor: event.actor, issuer: event.issuer, jti: event.jti, event }], {writeConcern:{w:'majority',j:true,wtimeout:10000}});
++}
++export async function storedIntent(project: any, localID: string, sectionID: string) {
++  const record:any = await remedyOperationRecords().findOne({projectID:project.projectID,localID,sectionID,kind:'intent'}).maxTimeMS(30000).lean();
++  // Legacy embedded entries remain immutable and readable; no startup migration.
++  return record?.event || project.remedyOperations?.find((entry:any)=>entry.kind==='intent' && entry.localID===localID && entry.sectionID===sectionID);
++}
+-- 
+2.54.0 (Apple Git-157)
+

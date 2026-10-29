@@ -8,8 +8,8 @@ Atlas tier, cluster topology and orchestrator are unknown.
 
 | Role | Upstream commit | Version context | Delivered tree |
 |---|---|---|---|
-| Primary staging | `67301b35c3784ed73ba1a65011ef5a1d689abca1` | Root package says 2.156.2; Chief assessment reported image label 2.157.0-rc.4 | `bec06bcc8e480068d4517396536e82ed68729e86` |
-| Secondary released floor | `352a657ec6de7b317a70ad3f8f744bc6d5054d9d` | v2.156.2 | `6d403848f76161624ccaa9051cc191dbfd16876d` |
+| Primary staging | `67301b35c3784ed73ba1a65011ef5a1d689abca1` | Root package says 2.156.2; Chief assessment reported image label 2.157.0-rc.4 | `ef76457706e242dade7be7d4d5dae9fb0f22e26f` |
+| Secondary released floor | `352a657ec6de7b317a70ad3f8f744bc6d5054d9d` | v2.156.2 | `96e14fc333d2006d2d7f26bb611ae1ed517d2bfa` |
 
 The image label is assessment context, not a pulled/booted image or observation of
 production. Do not use `latest`; approved deployment must pin compatible image
@@ -17,7 +17,7 @@ versions and digests. This work preserves the upstream Dockerfile and supplies
 source/patch integrity manifests, not a finished image/deployment bundle.
 
 Use the explicit fresh detached-checkout command in the repository README. Each
-manifest binds the full base commit, twenty-one ordered patch files, SHA-256s and
+manifest binds the full base commit, twenty-two ordered patch files, SHA-256s and
 final Git tree. The application tool checks those inputs and repository state
 before `git am --3way`, then checks the resulting tree. It makes no network call,
 reset, abort, branch deletion or push. On unexpected Git failure it preserves the

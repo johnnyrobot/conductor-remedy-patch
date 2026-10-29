@@ -1,0 +1,10 @@
+{
+  "staging": {
+    "diagnostics": 60,
+    "sameValidatedBaseline": true
+  },
+  "release": {
+    "diagnostics": 60,
+    "sameValidatedBaseline": true
+  }
+}
