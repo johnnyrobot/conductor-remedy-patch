@@ -1,7 +1,7 @@
 # conductor-remedy-patch
 
 The **Conductor side** of the LibreTexts Remedy accessibility matrix, shipped as
-fourteen `git am`-able patches against upstream Conductor.
+fifteen `git am`-able patches against upstream Conductor.
 
 This repository contains no Conductor source of its own. It is a delivery
 vehicle: you clone the real Conductor, apply these commits, and you have the
@@ -15,7 +15,7 @@ verification panel wired to a Remedy server.
 ```bash
 git clone https://github.com/LibreTexts/conductor.git
 cd conductor
-git checkout -b feat/remedy-a11y-wiring
+git checkout -b feat/remedy-a11y-wiring 1c1a5ec103b76b6f47de9917204784fc3bba1eb0
 git am -3 /path/to/conductor-remedy-patch/patches/*.patch
 ```
 
@@ -28,11 +28,13 @@ to apply cleanly onto — upstream `LibreTexts/conductor` at:
 | Release | `2.144.0` |
 | Branch | `master` |
 
-Also verified against upstream `master` at `b0401094` (release `2.151.0`,
+The earlier fourteen-patch series was also verified against upstream `master` at `b0401094` (release `2.151.0`,
 2026-09-02): with `-3`, thirteen patches apply untouched and patch 0001 stops on
 one trivial conflict in `server/package.json` — upstream changed the adjacent
 `"dev"` script line. Keep upstream's `"dev"` line, keep the added `"test"`
 line, `git add`, `git am --continue`, and the remaining thirteen go through.
+
+That drift check predates patch 0015; the supported base remains the pinned commit above.
 
 If upstream has moved further and a hunk no longer applies, `git am` stops and
 tells you which file. Resolve, `git add`, `git am --continue`. The files most
@@ -41,7 +43,7 @@ likely to drift: `server/api.js` (route table), `server/package.json`
 
 ---
 
-## The twelve commits
+## The fifteen commits
 
 Three layers. Each layer is usable without the ones after it.
 
@@ -84,12 +86,23 @@ Three layers. Each layer is usable without the ones after it.
 | 13 | `fix(a11y): require a reviewed preview before apply and report empty writes` | The matrix Fix modal now requires the same "I reviewed this preview" acknowledgement the work queue already had, and the work queue reports "No changes were written" when the bridge's `applied` flag is false instead of claiming success. |
 | 14 | `feat(a11y): name the Conductor reviewer in bridge write requests` | Page actions forward `requested_by` (the authenticated Conductor uuid) so the bridge audit log names the reviewer, not just the server account. Needs the matching bridge change (`requested_by` support); harmless without it. |
 
+**Release evidence lifecycle (0015)**
+
+| # | Commit | What it does |
+|---|---|---|
+| 15 | `fix(a11y): bind page actions and reviews to current evidence` | Matrix and queue share stored-section targeting and session-derived attribution. Auditor/foreign mutations are denied; evidence is invalidated before possible writes, and delayed pre-write scans cannot restore it. Known no-op and uncertain outcomes stay distinct. Reviewer checklists reset when evidence or scope changes. |
+
+Patch 0015 retains the existing Johnny sandbox restriction. Matrix scan/preview/apply
+callers must now send `sectionID`; browser URLs and page IDs are ignored.
+See [first-wave validation and remaining release gates](docs/releases/lt115-first-wave.md).
+This is a release fix, not a declaration that the whole stack is ready to deploy.
+
 Applying only commits 1 and 2 gives you a working API with no UI, which is a
 reasonable way to test the server integration on its own. Stopping after 3
 gives you the matrix as originally shipped; after 7, the work queue; after 10,
-verification; after 14, the apply-path safeguards.
+verification; after 14, the apply-path safeguards; after 15, the shared authorization and evidence lifecycle fix.
 
-### Files touched
+### Original fourteen-patch footprint
 
 ```
 client/src/components/projects/ProjectAccessibility.jsx    +1417   the matrix UI
@@ -143,11 +156,11 @@ All under the existing authenticated project API:
 | GET | `/project/:projectID/accessibility/workqueue/conformance/report` | Authenticated export of that report. |
 | POST | `/project/:projectID/accessibility/workqueue/conformance/:action` | `scope`, `review`, `signoff`. Reviewer identity and timestamp are server-set; records are append-only. |
 
-The work-queue and conformance routes reuse the project's edit permission
+The matrix, work-queue and conformance routes reuse the project's edit permission
 check. Nothing in them writes to CXone directly — every write goes through the
 bridge, which enforces its own sandbox guard.
 
-**Apply is only reachable after a preview.** The client sends the preview hash
+**A write must be bound to a reviewed preview.** The client sends the preview hash
 back and the server rejects a stale one, so a page that changed between preview
 and apply fails closed rather than overwriting someone's edit.
 
@@ -165,7 +178,7 @@ Client (Conductor's `CLIENT__*` passthrough):
 | Variable | Notes |
 |---|---|
 | `CLIENT__REMEDY_ENABLED` | `"true"` to show the Remedy controls in the matrix. |
-| `CLIENT__REMEDY_PANEL_URL` | Public URL of the Remedy bridge staff panel. |
+| `CLIENT__REMEDY_PANEL_URL` | Do not point this at a publicly exposed Bridge staff panel; non-loopback exposure remains blocked by LT-1. |
 
 If `REMEDY_API_KEY` is unset the header is simply omitted, which is fine against
 a Remedy server that does not require one.
@@ -182,7 +195,6 @@ services:
       REMEDY_API_BASE_URL: http://remedy-server:8000
       REMEDY_API_KEY: ${REMEDY_API_KEY}
       CLIENT__REMEDY_ENABLED: "true"
-      CLIENT__REMEDY_PANEL_URL: https://remedy.example.org
     networks: [cond, remedy_net]
 
 networks:
@@ -217,8 +229,8 @@ accessibility matrix needs all three services.
 ## Tests
 
 ```bash
-cd server && npm test      # tsx --test — 24 tests: a11yreviewutils, remediation queue/actions, conformance, handoff, CORS
-cd client && npm test      # vitest — 19 tests: accessibilityScore, RemediationPageActions
+cd server && npm test      # tsx --test — 25 tests: a11yreviewutils, remediation queue/actions, conformance, handoff, CORS
+cd client && npm test      # vitest — 22 tests: accessibilityScore, RemediationPageActions, ConformanceReview
 ```
 
 Both suites, `tsc --noEmit` and `vite build` in `client/` were run on the
