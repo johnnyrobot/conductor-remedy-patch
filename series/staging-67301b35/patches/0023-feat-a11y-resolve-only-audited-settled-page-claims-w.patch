@@ -1,0 +1,518 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: johnnyrobot <174211481+johnnyrobot@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 09:47:58 -0700
+Subject: [PATCH] feat(a11y): resolve only audited settled page claims with
+ fresh evidence (LT-127)
+
+Require current support policy, durable Bridge resolved status and explicit local version; append immutable preparation and bounded atomic commit marker before releasing only that claim. Preserve unknown outcomes and keep lost-success cases held.
+---
+ docs/remedy-explicit-recovery.md           | 128 +++++++++++++++++++++
+ server/api/remediationactions.ts           |  13 ++-
+ server/api/remediationqueue.ts             |   4 +-
+ server/api/remedyrecovery.ts               |  79 +++++++++++++
+ server/api/validators/remedy-resolution.ts |   6 +
+ server/integration/remedy-routes.test.ts   | 103 ++++++++++++++++-
+ server/models/project.ts                   |   2 +
+ server/util/a11yreviewutils.ts             |   2 +
+ server/util/conformance.test.ts            |   9 ++
+ server/util/conformance.ts                 |   4 +-
+ 10 files changed, 340 insertions(+), 10 deletions(-)
+ create mode 100644 docs/remedy-explicit-recovery.md
+ create mode 100644 server/api/remedyrecovery.ts
+ create mode 100644 server/api/validators/remedy-resolution.ts
+
+diff --git a/docs/remedy-explicit-recovery.md b/docs/remedy-explicit-recovery.md
+new file mode 100644
+index 00000000..8f85d936
+--- /dev/null
++++ b/docs/remedy-explicit-recovery.md
+@@ -0,0 +1,128 @@
++# Explicit administrative Conductor recovery (LT-127)
++
++This local resolution action is separate from read-only lookup and Bridge's
++local offline operator tooling. It never retries an external mutation or enables
++production writes. Production credentials, real administrative resolution and
++live deployment remain owner-only actions under the release hold.
++
++## Admission and proof
++
++`POST /project/:projectID/accessibility/workqueue/page/:sectionID/operations/:localID/resolve`
++requires an actual verified session, current support/superadmin role in LibreTexts,
++existing project access and the configured project/tenant opt-in. An ordinary
++project editor, including the original write actor, cannot resolve a claim.
++Support privileges are checked again after the scan. The selected operation must
++come from the stored local mapping; browser issuer/jti/action/target/actor fields
++are rejected. The target must still match the original stored binding and one
++unambiguous project section in the approved Johnny sandbox.
++
++The request is strictly validated with the upstream Zod middleware:
++
++```json
++{
++  "expectedVersion": 1,
++  "confirmed": true,
++  "reason": "Operator evidence references and explicit request for a fresh canonical scan"
++}
++```
++
++Use the integer evidence version from the authenticated operation lookup. A
++missing section reports a null version and cannot be resolved. Confirming a
++request is not permission to skip Bridge settlement or invent a terminal outcome.
++
++The server reads authenticated Bridge status using stored issuer/jti, requires
++`outcome: unknown_write`, `reconciliation: resolved` and
++`requires_reconciliation: false`, then performs an actual fresh canonical source
++scan. It checks returned page ID/path, all 50 unique criterion IDs and supported
++statuses, source hash, freshness, error flags and any supplied rendered evidence.
++Automated failures may remain in a valid scan; they remain failures. It does not
++fabricate browser evidence: a source-only scan leaves rendered/human verification
++pending. A second authenticated status lookup must match the same durable
++operation ID and resolution timestamp before local persistence.
++
++The scan is capped at 1 MiB of new evidence. A failed/incomplete/mismatched scan,
++stale version/status, revoked role, unavailable store, changed target/project
++policy or conflicting claim cannot release the pending state. Missing signing
++material does not block this read-and-local-CAS workflow.
++
++## Auditable write-ahead and CAS
++
++1. Append a journaled immutable `resolution` preparation in
++   remedyoperationrecords. It records the verified support actor, reason,
++   original actor/nonce/action/target, durable remote status, expected local
++   version and scan digest/time. It is explicitly `prepared_for_local_cas`;
++   preparation alone never claims success.
++2. One journaled Project CAS checks the exact section/target/version/pending
++   local ID and unchanged project policy. It stores the fresh scan, advances the
++   evidence version, appends a small immutable resolution commit marker and
++   clears only that pending pointer. The applied resolution epoch changes the
++   page fingerprint so old human reviews cannot revive if identical bytes recur.
++3. No required post-CAS append can fail after release. The bounded Project commit
++   marker permanently identifies the winning preparation, even if a later TOC
++   removes the section. Later write intents retain their predecessor resolution
++   reference. A losing concurrent preparation stays auditable but uncommitted.
++
++Project commit markers are private, append-only and explicitly limited to 1,000.
++The final CAS also requires the physical Project document to remain below 12 MiB
++before storing at most 1 MiB of new scan evidence, leaving room below Mongo's
++16 MiB ceiling. Exhaustion refuses further resolution and preserves all history;
++a separately reviewed storage expansion is required, not deletion/compaction.
++Markers are included in administrative operation exports and the matching
++actor/support status response, not ordinary project reads. No new collection,
++transaction or replica-set prerequisite is introduced. Disabled Remedy does not
++initialize optional feature collections.
++
++Failure before a successful CAS leaves the claim held. If a final CAS commits but
++its acknowledgement/reply is lost, do not infer failure or retry automatically:
++read the local pending state and immutable commit marker. The CAS can only commit
++when fresh evidence and the already-durable preparation are present. An unrelated
++claim is never cleared, and a delayed resolver cannot overwrite a winner or a
++later claim.
++
++## Operator order
++
++These are instructions for an approved operator, not steps an agent may run on a
++live system.
++
++1. Follow Bridge `docs/release/lt-159-offline-resolution.md`: drain all writers,
++   establish actual external-request settlement, preserve exact report/evidence,
++   and record the separate offline decision with exclusive ownership and the
++   independent durable fence. Source equality, time, HTTP 4xx or key rotation do
++   not establish settlement. Preserve original unknown outcomes/tombstones.
++2. Restart only after the operator has authorized it and trust/store checks pass.
++   Read the Conductor operation endpoint with the existing approved session.
++   A lookup still mutates nothing; remote resolved status alone does not unlock.
++3. Preserve the current local version and prepare the explicit confirmed request.
++   Submit it only with support/superadmin plus current project policy. For
++   example, using restricted files rather than printing credentials:
++
++```sh
++curl --silent --show-error --fail-with-body \
++  --cookie "$restricted_cookie_jar" \
++  -H 'Content-Type: application/json' \
++  --data-binary "@$restricted_resolution_request" \
++  "$approved_conductor_origin/api/v1/project/$project_id/accessibility/workqueue/page/$section_id/operations/$local_operation_id/resolve"
++```
++
++4. Inspect the returned local resolution ID/version, fresh evidence and read-only
++   operation/commit marker. Remote outcome stays unknown; resolved is an audited
++   settlement decision, not proof of successful editing or WCAG conformance.
++5. On refusal, preserve artifacts and the pending claim. Refresh read-only status;
++   do not perform a global unlock, replay the mutation, remove history, restore
++   an old fence with a database or treat a snapshot restore as settlement.
++
++Back up the full Project (including private commit markers), immutable records,
++user identities and Bridge's ledger/fence/snapshots/trust epoch consistently after
++draining writers. Keep a compatible reader during rollback. Reverting runtime
++code cannot undo an administrative record or make an old pending pointer safe.
++
++## Remaining contract gate
++
++Bridge LT-159 currently resolves active terminal unknown_write operations only.
++A locally pending operation whose remote result is known_success, not_attempted
++or absent cannot obtain resolved through that command. This endpoint deliberately
++keeps those claims held. A known-success result after a lost Conductor reply is
++reproduced in component and actual-service HTTP evidence. The Chief must scope
++any extension to durable receipts/administrative settlement; no generic status
++or source-equality unlock is implemented here. LT-127's broader recovery ticket
++and LT-111 production release remain open for that decision and other gates.
+diff --git a/server/api/remediationactions.ts b/server/api/remediationactions.ts
+index ff581020..b058597c 100644
+--- a/server/api/remediationactions.ts
++++ b/server/api/remediationactions.ts
+@@ -1,3 +1,4 @@
++import {registerRemedyRecovery} from './remedyrecovery.js';
+ import { workItemAppendBudget, requireEventBudget, requireWorkItemBudget } from '../util/remedyBudgets.js';
+ import { beginRemedyExport } from '../util/remedyExports.js';
+ import { pagination, encodeCursor, recordSnapshot, READ_TIMEOUT_MS } from '../util/conformanceReads.js';
+@@ -9,17 +10,18 @@ import { requireRemedyConfiguration } from '../util/remedyConfig.js';
+ import { checkedPreview, checkedOutcome, reviewError, reviewInputs, reviewSession, safeOperationMetadata, signingConfiguration, signReviewedOperation } from '../util/remedyReview.js';
+ 
+ /** Page actions and scoped status lookup use the same project authorization seam. */
+-export function registerRemediationActions(router: any, { base, access, Project, WorkItems, OperationRecords, bridge = callBridge }: any) {
++export function registerRemediationActions(router: any, { base, access, Project, auth, WorkItems, OperationRecords, bridge = callBridge }: any) {
++  registerRemedyRecovery(router,{base,access,Project,auth,bridge});
+   router.post(`${base}/page/:sectionID/:action`, ...access, createRemediationActionHandler({ Project, WorkItems, bridge, OperationRecords }));
+   router.get(`${base}/operations/report`,...access,async(req:any,res:any)=>{
+     const stream=beginRemedyExport(res);
+     try {
+       if(!req.queueOperationAdmin||!req.queueCanEdit)throw reviewError('Support or superadmin project access required for operation export.',403);
+       const Records=remedyOperationRecords(),upper=await recordSnapshot(Records,stream.signal);
+-      const legacy=await Project.findOne({projectID:req.params.projectID}).select('+remedyOperations').setOptions({signal:stream.signal}).maxTimeMS(READ_TIMEOUT_MS).lean();
++      const legacy=await Project.findOne({projectID:req.params.projectID}).select('+remedyOperations +remedyResolutionCommits').setOptions({signal:stream.signal}).maxTimeMS(READ_TIMEOUT_MS).lean();
+       res.setHeader('Cache-Control','no-store');res.setHeader('Content-Type','application/json');
+       res.setHeader('Content-Disposition',`attachment; filename="${req.params.projectID}-remedy-operations.json"`);
+-      await stream.write(JSON.stringify({projectID:req.params.projectID,legacyOperationHistory:legacy?.remedyOperations||[],exportSnapshot:String(upper)}).slice(0,-1)+',"operationHistory":[');
++      await stream.write(JSON.stringify({projectID:req.params.projectID,legacyOperationHistory:legacy?.remedyOperations||[],resolutionCommits:legacy?.remedyResolutionCommits||[],exportSnapshot:String(upper)}).slice(0,-1)+',"operationHistory":[');
+       const cursor=stream.openCursor(()=>Records.find({projectID:req.params.projectID,_id:{$lte:upper}}).sort({_id:1}).maxTimeMS(120_000).cursor({batchSize:100}));let first=true;
+       for await(const record of cursor){await stream.write((first?'':',')+JSON.stringify(record));first=false;}
+       await stream.write('],"complete":true}');res.end();
+@@ -59,7 +61,8 @@ export function registerRemediationActions(router: any, { base, access, Project,
+       const outcome = checkedOutcome(result, intent.action);
+       if (!outcome) throw reviewError('The operation status is unavailable or ambiguous. Keep the page blocked and contact the deployment operator.', 502);
+       return res.json({ err: false, localOperationID: intent.localID, operation: safeOperationMetadata(outcome.metadata),
+-        pending: !section || Boolean(section.remedyWritePending), readOnly: true,
++        pending: !section || Boolean(section.remedyWritePending), readOnly: true,evidenceVersion:section?Number(section.remedyEvidenceVersion||0):null,
++        localResolution:req.queueProject.remedyResolutionCommits?.find((entry:any)=>entry.localID===intent.localID)||null,
+         message: 'Read-only operation evidence. This lookup does not release a pending claim, repair audit history, rescan or retry a write.' });
+     } catch (error: any) {
+       return res.status(error.status || 502).json({ err: true, errMsg: error.publicMessage || 'Operation evidence is unavailable. Keep the page blocked; do not retry the write.' });
+@@ -150,7 +153,7 @@ export function createRemediationActionHandler({ Project, WorkItems, OperationRe
+         const signed = signReviewedOperation(signingConfiguration(), review.binding, actor, review.expiresAt);
+         const candidate = { kind: 'intent', localID: randomUUID(), actor, session, action, sectionID: req.params.sectionID, at: new Date(),
+           issuer: signed.issuer, jti: signed.jti, expiresAt: signed.exp, reviewID: review.id,
+-          binding: review.binding, sectionURL: section.sectionURL, pageID: section.pageID, evidenceVersion };
++          binding: review.binding, previousResolutionID:section.remedyResolutionEpoch||null, sectionURL: section.sectionURL, pageID: section.pageID, evidenceVersion };
+         // Write-ahead intent is durable before the active-pointer CAS and dispatch.
+         // CAS failure leaves an orphan event, never an unrecorded external write.
+         await appendOperation(req.params.projectID, candidate, OperationRecords);
+diff --git a/server/api/remediationqueue.ts b/server/api/remediationqueue.ts
+index 5aa770cf..9a7f7d4a 100644
+--- a/server/api/remediationqueue.ts
++++ b/server/api/remediationqueue.ts
+@@ -47,7 +47,7 @@ export function registerRemediationQueue(router: any, { auth, projects, Project,
+     try {
+       if (!/^[\w-]{1,100}$/.test(req.params.projectID)) return res.status(400).json({ err: true, errMsg: 'Invalid project.' });
+       const lookup = Project.findOne({ projectID: req.params.projectID });
+-      if (req.params.localID) lookup.select('+remedyOperations');
++      if (req.params.localID) lookup.select('+remedyOperations +remedyResolutionCommits');
+       const project = await lookup.lean();
+       if (!project || !projects.checkProjectMemberPermission(project, req.user)) return res.status(403).json({ err: true, errMsg: 'Project team access required.' });
+       req.queueOperationAdmin = auth.checkHasRole(req.user, 'libretexts', ['superadmin', 'support']);
+@@ -62,7 +62,7 @@ export function registerRemediationQueue(router: any, { auth, projects, Project,
+   };
+   const access = [auth.verifyRequest, auth.getUserAttributes, authorize];
+   registerConformance(router, { base, access });
+-  registerRemediationActions(router, { base, access, Project, WorkItems, OperationRecords, bridge });
++  registerRemediationActions(router, { base, access, Project, auth, WorkItems, OperationRecords, bridge });
+   router.get(base, ...access, async (req: any, res: any) => {
+     try {
+       const {limit,cursor}=pagination(req.query);
+diff --git a/server/api/remedyrecovery.ts b/server/api/remedyrecovery.ts
+new file mode 100644
+index 00000000..125bc0ed
+--- /dev/null
++++ b/server/api/remedyrecovery.ts
+@@ -0,0 +1,79 @@
++import {BSON} from 'mongodb';
++import {createHash,randomUUID} from 'node:crypto';
++import {Response} from 'express';
++import {z} from 'zod';
++import {ZodReqWithUser} from '../types/Express.js';
++import middleware from '../middleware.js';
++import {resolveRemedyOperationSchema} from './validators/remedy-resolution.js';
++import {criteria} from '../util/conformance.js';
++import {appendOperation,storedIntent} from '../util/remedyOperationRecords.js';
++import {checkedOutcome,reviewError,safeOperationMetadata} from '../util/remedyReview.js';
++
++type ResolutionRequest=ZodReqWithUser<z.infer<typeof resolveRemedyOperationSchema>>&{
++ queueProject:any;queueCanEdit:boolean;queueOperationAdmin:boolean;
++};
++function currentTarget(section:any,intent:any){
++ const url=new URL(section.sectionURL),path=decodeURIComponent(url.pathname);
++ if(url.origin!=='https://dev.libretexts.org'||url.username||url.password||/[\\\x00-\x1f]/.test(path)||path.split('/').some(part=>part==='.'||part==='..')||!path.startsWith('/Sandboxes/johnnyphung/')
++  ||intent.sectionURL!==section.sectionURL||intent.pageID!==section.pageID||intent.binding?.target?.hostname!==url.hostname||intent.binding.target.page_id!==section.pageID||intent.binding.target.page_path!==path.slice(1))
++  throw reviewError('The stored operation target changed. Keep the claim held and contact the operator.');
++ return {page_url:section.sectionURL,section_title:section.sectionTitle};
++}
++function freshScan(result:any,section:any,intent:any,started:number){
++ const review=result?.wcag_review||result?.wcagReview,at=Date.parse(review?.scannedAt),now=Date.now();
++ const statuses=new Set(['pass','fail','manual_review','not_tested','not_applicable']);
++ if(result?.err||result?.error||result?.scanError||result?.scan_error||result?.errors?.length||result?.engine_errors?.length
++  ||String(result?.page_id)!==section.pageID||result?.page_path!==intent.binding.target.page_path
++  ||!review||!/^([a-f0-9]{16}|[a-f0-9]{64})$/.test(review.sourceHash)||!Number.isFinite(at)||at<started-60_000||at>now+60_000
++  ||!Array.isArray(review.criteria)||review.criteria.length!==criteria.length||new Set(review.criteria.map((c:any)=>c.id)).size!==criteria.length
++  ||criteria.some(c=>!review.criteria.some((actual:any)=>actual.id===c.id&&statuses.has(actual.status)))
++  ||(review.rendered&&(review.rendered.state!=='complete'||review.rendered.sourceHash!==review.sourceHash||!review.rendered.renderedHash||!review.rendered.platformHash)))
++  throw reviewError('A fresh complete canonical scan is required. The pending claim was not released.',502);
++ if(BSON.calculateObjectSize({review,dojExceptions:result.doj_exceptions||result.dojExceptions||[]})>1024*1024)throw reviewError('Fresh scan evidence exceeds the explicit 1 MiB recovery budget. The claim remains held.',413);
++ return review;
++}
++/** Administrative local recovery only. No external write path exists here. */
++export function registerRemedyRecovery(router:any,{base,access,Project,auth,bridge}:any){
++ router.post(`${base}/page/:sectionID/operations/:localID/resolve`,...access,middleware.validateZod(resolveRemedyOperationSchema),async(req:ResolutionRequest,res:Response)=>{
++  try{
++   if(!req.queueCanEdit||!req.queueOperationAdmin)throw reviewError('Support or superadmin project access is required for explicit resolution.',403);
++   const sections=(req.queueProject.a11yReview||[]).filter((section:any)=>String(section._id)===req.params.sectionID);
++   const section=sections[0],intent=await storedIntent(req.queueProject,req.params.localID,req.params.sectionID);
++   if(!intent)throw reviewError('Operation is unavailable to this project user.',403);
++   if(sections.length!==1||!section.remedyWritePending||section.remedyPendingOperation!==intent.localID||(section.remedyEvidenceVersion||0)!==req.body.expectedVersion)
++    throw reviewError('The pending claim or evidence version changed. Refresh operation evidence before continuing.');
++   if((req.queueProject.remedyResolutionCommits?.length||0)>=1000)throw reviewError('Project resolution history reached its explicit 1,000-marker safety limit. Preserve/export it and contact the operator.');
++   const target=currentTarget(section,intent);
++   const status=checkedOutcome(await bridge('operation-status',{issuer:intent.issuer,jti:intent.jti}),intent.action);
++   if(!status||status.metadata.reconciliation!=='resolved'||status.metadata.requires_reconciliation!==false||status.metadata.outcome!=='unknown_write')
++    throw reviewError('The Bridge operation has no durable administrative resolution. The local claim remains held.');
++   const started=Date.now();
++   // Explicit canonical read. Never send a preview, mutation or retry request.
++   const result=await bridge('scan',{...target,rendered:false,wcag_review:null,doj_exceptions:section.dojExceptions||[]});
++   const review=freshScan(result,section,intent,started);
++   const current=checkedOutcome(await bridge('operation-status',{issuer:intent.issuer,jti:intent.jti}),intent.action);
++   if(!current||current.metadata.reconciliation!=='resolved'||current.metadata.requires_reconciliation||current.metadata.outcome!=='unknown_write'||current.metadata.operation_id!==status.metadata.operation_id||current.metadata.updated_at!==status.metadata.updated_at)
++    throw reviewError('The durable operation status changed or became unavailable during the scan. The claim remains held.');
++   if(!await auth.checkHasRoleByID(req.user.decoded.uuid,'libretexts',['support','superadmin']))throw reviewError('Administrative permission changed. The claim remains held.',403);
++   const resolutionID=randomUUID(),event={kind:'resolution',localID:intent.localID,sectionID:req.params.sectionID,resolutionID,
++    actor:req.user.decoded.uuid,at:new Date(),reason:req.body.reason,phase:'prepared_for_local_cas',expectedVersion:req.body.expectedVersion,
++    originalActor:intent.actor,issuer:intent.issuer,jti:intent.jti,action:intent.action,target:intent.binding.target,
++    operation:safeOperationMetadata(status.metadata),scanHash:createHash('sha256').update(JSON.stringify(review)).digest('hex'),scannedAt:review.scannedAt};
++   // Journal preparation before CAS; a bounded append-only marker in that same
++   // Project CAS permanently identifies the winner, even after a TOC removal.
++   await appendOperation(req.params.projectID,event);
++   const saved=await Project.updateOne({projectID:req.params.projectID,
++    $expr:{$and:[...['members','leads','liaisons','orgID'].map(key=>({$eq:[{$ifNull:[`$${key}`,key==='orgID'?'':[]]},{$literal:req.queueProject[key]??(key==='orgID'?'':[])}]})),{$lt:[{$size:{$ifNull:['$remedyResolutionCommits',[]]}},1000]},{$lt:[{$bsonSize:'$$ROOT'},12*1024*1024]}]},
++    a11yReview:{$elemMatch:{_id:section._id,sectionURL:section.sectionURL,pageID:section.pageID,remedyWritePending:true,remedyPendingOperation:intent.localID,
++     remedyEvidenceVersion:req.body.expectedVersion===0?{$in:[null,0]}:req.body.expectedVersion}}},
++    {$set:{'a11yReview.$.wcagReview':review,'a11yReview.$.dojExceptions':result.doj_exceptions||result.dojExceptions||[],
++      'a11yReview.$.remedyError':'','a11yReview.$.remedyLastScannedAt':new Date(),'a11yReview.$.remedyWritePending':false,
++      'a11yReview.$.remedyResolutionEpoch':resolutionID,'a11yReview.$.remedyLastResolution':{id:resolutionID,localID:intent.localID,actor:req.user.decoded.uuid,at:event.at,scanHash:event.scanHash}},
++     $push:{remedyResolutionCommits:{id:resolutionID,localID:intent.localID,actor:req.user.decoded.uuid,at:event.at,evidenceVersion:req.body.expectedVersion+1}},
++     $inc:{'a11yReview.$.remedyEvidenceVersion':1},$unset:{'a11yReview.$.remedyPendingOperation':'','a11yReview.$.remedyReviewedPreview':''}},
++    {writeConcern:{w:'majority',j:true,wtimeout:10000}});
++   if(saved.acknowledged===false||saved.matchedCount!==1)throw reviewError('The page or claim changed during resolution. No conflicting evidence was overwritten.');
++   return res.json({err:false,resolved:true,resolutionID,localOperationID:intent.localID,evidenceVersion:req.body.expectedVersion+1,operation:safeOperationMetadata(status.metadata),message:'The matching local claim was resolved after a fresh scan. Human conformance remains pending.'});
++  }catch(error:any){return res.status(error.status||502).json({err:true,errMsg:error.publicMessage||'Resolution acknowledgement is unavailable. Refresh read-only operation evidence; do not automatically retry or clear a claim.'});}
++ });
++}
+diff --git a/server/api/validators/remedy-resolution.ts b/server/api/validators/remedy-resolution.ts
+new file mode 100644
+index 00000000..dd83eb27
+--- /dev/null
++++ b/server/api/validators/remedy-resolution.ts
+@@ -0,0 +1,6 @@
++import { z } from 'zod';
++export const resolveRemedyOperationSchema=z.object({
++ params:z.object({projectID:z.string().regex(/^[\w-]{1,100}$/),sectionID:z.string().regex(/^[a-f0-9]{24}$/i),localID:z.string().uuid()}),
++ query:z.object({}).strict(),
++ body:z.object({expectedVersion:z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER-1),confirmed:z.literal(true),reason:z.string().trim().min(20).max(4000)}).strict(),
++});
+diff --git a/server/integration/remedy-routes.test.ts b/server/integration/remedy-routes.test.ts
+index 6c6da122..faf03729 100644
+--- a/server/integration/remedy-routes.test.ts
++++ b/server/integration/remedy-routes.test.ts
+@@ -44,14 +44,14 @@ let holdTOC: (() => Promise<void>) | undefined;
+ let tocCalls = 0;
+ let tocURL = page, tocPageID = '123', tocTitle = 'Imported title';
+ const originalAdapter = axios.defaults.adapter;
+-function scan() { const at = new Date().toISOString(), sourceHash = createHash('sha256').update(changed ? '<p>after</p>' : '<p>before</p>').digest('hex').slice(0, 16); return { wcag_review: { sourceHash, scannedAt: at, criteria: criteria.map(c => ({ ...c, status: 'manual_review' })), rendered: { state: 'complete', sourceHash, renderedHash: changed ? 'new-render' : 'old-render', platformHash: 'platform', browser: 'synthetic', axeVersion: '4', scannedAt: at, violations: [] } }, findings: [], scanned_at: at }; }
++function scan() { const at = new Date().toISOString(), sourceHash = createHash('sha256').update(changed ? '<p>after</p>' : '<p>before</p>').digest('hex').slice(0, 16); return { page_id:'123',page_path:'Sandboxes/johnnyphung/Conductor_test',wcag_review: { sourceHash, scannedAt: at, criteria: criteria.map(c => ({ ...c, status: 'manual_review' })), rendered: { state: 'complete', sourceHash, renderedHash: changed ? 'new-render' : 'old-render', platformHash: 'platform', browser: 'synthetic', axeVersion: '4', scannedAt: at, violations: [] } }, findings: [], scanned_at: at }; }
+ async function listen(server: http.Server) { await new Promise<void>(r => server.listen(0, '127.0.0.1', r)); return `http://127.0.0.1:${(server.address() as any).port}`; }
+ let requestBatch=0,batchStarted=0;
+ async function request(path: string, method = 'GET', body?: any, user = 'editor') {
+   if(!batchStarted)batchStarted=Date.now();
+   if(++requestBatch%400===0){const wait=60_100-(Date.now()-batchStarted);if(wait>0)await new Promise(r=>setTimeout(r,wait));batchStarted=Date.now();}
+   const response = await fetch(origin + '/api/v1' + path, { method, redirect: 'manual', headers: { 'Content-Type': 'application/json', ...(cookies[user] ? { cookie: cookies[user] } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+-  return { status: response.status, data: await response.json() };
++  let data:any;try{data=JSON.parse(await response.text());}catch{data={err:true,errMsg:'Non-JSON endpoint response.'};}return {status:response.status,data};
+ }
+ const base = `/project/${projectID}/accessibility/workqueue`;
+ const matrix = '/project/accessibility/remedy';
+@@ -879,3 +879,102 @@ test('actual 500-page 25k-review summary stays bounded while preserving complete
+  const bytes=Buffer.byteLength(JSON.stringify(response.data));assert.ok(bytes<1_000_000,'default summary has an explicit bounded shape');
+  process.stdout.write(JSON.stringify({synthetic:true,probe:'authenticated-summary',pages:500,reviews:25000,milliseconds,bytes})+'\n');
+ });
++
++test('explicit support resolution requires durable settlement and refreshes only the matching claim without a signer',async()=>{
++ outcome='unknown';const write=await request(`${matrix}/apply`,'POST',await reviewedInput());assert.equal(write.status,502);
++ const localID=write.data.localOperationID,path=`${base}/page/${sectionID}/operations/${localID}/resolve`;
++ const Records=mongoose.connection.db!.collection('remedyoperationrecords'),original=await Records.find({projectID}).sort({_id:1}).toArray();
++ const intent=original.find(r=>r.kind==='intent')!.event;
++ const project=await Project.findOne({projectID}).lean(),version=Number(project!.a11yReview[0].remedyEvidenceVersion||0);
++ const body={expectedVersion:version,confirmed:true,reason:'Synthetic support reviewed durable Bridge settlement and requests fresh canonical evidence.'};
++ assert.equal((await request(path,'POST',body)).status,403,'ordinary actor is not an administrative resolver');
++ await User.updateOne({uuid:users.auditor},{$set:{roles:[{org:'libretexts',role:'support'}]}});
++ assert.equal((await request(path,'POST',body,'auditor')).status,409,'remote quarantine cannot be cleared');
++ const remote=operations.get(intent.issuer+':'+intent.jti);operations.set(intent.issuer+':'+intent.jti,{...remote,reconciliation:'resolved',requires_reconciliation:false,updated_at:new Date().toISOString()});
++ const lookup=await request(`${base}/page/${sectionID}/operations/${localID}`,'GET',undefined,'auditor');assert.equal(lookup.status,200);assert.equal(lookup.data.pending,true,'lookup alone still changes nothing');
++ process.env.REMEDY_REVIEWER_KEY_ENABLED='false';
++ const response=await request(path,'POST',body,'auditor');assert.equal(response.status,200,JSON.stringify(response.data));
++ const after=await Project.findOne({projectID}).lean(),section=after!.a11yReview[0];
++ assert.equal(section.remedyWritePending,false);assert.equal(section.remedyPendingOperation,undefined);assert.equal(section.remedyEvidenceVersion,version+1);assert.ok(section.remedyResolutionEpoch);
++ const commit=await Project.findOne({projectID}).select('+remedyResolutionCommits').lean();assert.equal((commit as any).remedyResolutionCommits.length,1);assert.equal((commit as any).remedyResolutionCommits[0].id,response.data.resolutionID);
++ assert.equal(calls.filter(c=>c.path.endsWith('/apply-fix')).length,1,'resolution never retries a remote mutation');
++ const events=await Records.find({projectID}).sort({_id:1}).toArray();assert.deepEqual(events.slice(0,original.length),original);assert.equal(events.filter(r=>r.kind==='resolution').length,1);
++ assert.equal((await request(base+'/conformance')).data.report.verifiedCriteria,0,'resolution cannot revive an old human review');
++ assert.equal((await request(path,'POST',body,'auditor')).status,409,'a second resolution cannot clear another claim');
++});
++
++async function quarantinedResolution(){
++ outcome='unknown';const write=await request(`${matrix}/apply`,'POST',await reviewedInput());assert.equal(write.status,502);
++ const intent=(await mongoose.connection.db!.collection('remedyoperationrecords').findOne({projectID,localID:write.data.localOperationID,kind:'intent'}))!.event;
++ await User.updateOne({uuid:users.auditor},{$set:{roles:[{org:'libretexts',role:'support'}]}});
++ const key=intent.issuer+':'+intent.jti,remote=operations.get(key);operations.set(key,{...remote,reconciliation:'resolved',requires_reconciliation:false,updated_at:new Date().toISOString()});
++ const stored=await Project.findOne({projectID}).lean();
++ return {intent,key,path:`${base}/page/${sectionID}/operations/${intent.localID}/resolve`,body:{expectedVersion:Number(stored!.a11yReview[0].remedyEvidenceVersion||0),confirmed:true,reason:'Synthetic support reviewed the durable settlement and requests a fresh canonical scan.'}};
++}
++
++test('recovery rejects stale version, browser claims, foreign project, missing confirmation and failed fresh scan',async()=>{
++ const f=await quarantinedResolution(),Records=mongoose.connection.db!.collection('remedyoperationrecords');
++ const original=await Project.findOne({projectID}).lean(),events=await Records.find({projectID}).sort({_id:1}).toArray(),count=calls.length;
++ for(const body of [{...f.body,expectedVersion:f.body.expectedVersion+1},{...f.body,confirmed:false},{...f.body,reason:'short'},{...f.body,issuer:'forged',jti:'forged'}])assert.ok((await request(f.path,'POST',body,'auditor')).status>=400);
++ assert.equal(calls.length,count,'invalid local input never reaches the engine');
++ await Project.create({projectID:'foreign001',orgID:'libretexts',title:'Foreign synthetic project',members:[],leads:[],liaisons:[],auditors:[],a11yReview:[]});
++ assert.equal((await request(f.path.replace(projectID,'foreign001'),'POST',f.body,'auditor')).status,403);
++ scanFails=true;const failed=await request(f.path,'POST',f.body,'auditor');assert.ok(failed.status>=400);
++ assert.deepEqual(await Project.findOne({projectID}).lean(),original);assert.deepEqual(await Records.find({projectID}).sort({_id:1}).toArray(),events);
++});
++
++test('a changed remote status or revoked administrative role during the scan cannot release the claim',async()=>{
++ const f=await quarantinedResolution();
++ for(const change of ['status','role']){
++  let release!:()=>void,started!:()=>void;const held=new Promise<void>(r=>release=r),entered=new Promise<void>(r=>started=r);
++  holdScan=async()=>{started();await held;};
++  const requestPromise=request(f.path,'POST',f.body,'auditor');await entered;
++  if(change==='status')operations.set(f.key,{...operations.get(f.key),updated_at:new Date(Date.now()+1000).toISOString()});
++  else await User.updateOne({uuid:users.auditor},{$set:{roles:[{org:'libretexts',role:'user'}]}});
++  release();const result=await requestPromise;assert.ok(result.status>=400);
++  assert.equal((await Project.findOne({projectID}).lean())!.a11yReview[0].remedyWritePending,true);
++ }
++});
++
++test('resolution preparation failure and evidence CAS races preserve pending state and original history',async()=>{
++ const f=await quarantinedResolution(),Records=mongoose.connection.db!.collection('remedyoperationrecords');
++ const original=await Records.find({projectID}).sort({_id:1}).toArray();
++ await mongoose.connection.db!.command({collMod:'remedyoperationrecords',validator:{kind:{$ne:'resolution'}},validationLevel:'strict',validationAction:'error'});
++ try{assert.ok((await request(f.path,'POST',f.body,'auditor')).status>=400);assert.equal((await Project.findOne({projectID}).lean())!.a11yReview[0].remedyWritePending,true);}
++ finally{await mongoose.connection.db!.command({collMod:'remedyoperationrecords',validator:{}});}
++ let release!:()=>void,started!:()=>void;const held=new Promise<void>(r=>release=r),entered=new Promise<void>(r=>started=r);holdScan=async()=>{started();await held;};
++ const resolving=request(f.path,'POST',f.body,'auditor');await entered;
++ await Project.updateOne({projectID,'a11yReview._id':sectionID},{$inc:{'a11yReview.$.remedyEvidenceVersion':1}});release();
++ assert.equal((await resolving).status,409);const section=(await Project.findOne({projectID}).lean())!.a11yReview[0];assert.equal(section.remedyWritePending,true);assert.equal(section.remedyResolutionEpoch,undefined);
++ const after=await Records.find({projectID}).sort({_id:1}).toArray();assert.deepEqual(after.slice(0,original.length),original);assert.equal(after.at(-1)!.event.phase,'prepared_for_local_cas');
++});
++
++test('one resolution never releases another page claim and concurrent resolvers cannot overwrite the winner',async()=>{
++ const f=await quarantinedResolution(),otherID=new mongoose.Types.ObjectId(),otherOperation=randomUUID();
++ await Project.updateOne({projectID},{$push:{a11yReview:{_id:otherID,sectionTitle:'Other held page',sectionURL:page+'/Other',pageID:'999',remedyWritePending:true,remedyPendingOperation:otherOperation,remedyEvidenceVersion:9}}});
++ let release!:()=>void,started!:()=>void;const held=new Promise<void>(r=>release=r),entered=new Promise<void>(r=>started=r);holdScan=async()=>{started();await held;};
++ const slow=request(f.path,'POST',f.body,'auditor');await entered;
++ const winner=await request(f.path,'POST',f.body,'auditor');assert.equal(winner.status,200,JSON.stringify(winner.data));release();assert.equal((await slow).status,409);
++ const project=await Project.findOne({projectID}).lean(),first=project!.a11yReview.find((s:any)=>String(s._id)===sectionID),second=project!.a11yReview.find((s:any)=>String(s._id)===String(otherID));
++ assert.equal(first!.remedyWritePending,false);assert.equal(first!.remedyResolutionEpoch,winner.data.resolutionID);assert.equal(second!.remedyWritePending,true);assert.equal(second!.remedyPendingOperation,otherOperation);
++ assert.equal(calls.filter(c=>c.path.endsWith('/apply-fix')).length,1);
++});
++
++test('known remote success without an offline resolution remains held after a lost Conductor reply',async()=>{
++ outcome='uncertain';const write=await request(`${matrix}/apply`,'POST',await reviewedInput());assert.equal(write.status,502);
++ const stored=await Project.findOne({projectID}).lean(),version=Number(stored!.a11yReview[0].remedyEvidenceVersion||0);
++ await User.updateOne({uuid:users.auditor},{$set:{roles:[{org:'libretexts',role:'support'}]}});
++ const path=`${base}/page/${sectionID}/operations/${write.data.localOperationID}`;
++ const status=await request(path,'GET',undefined,'auditor');assert.equal(status.data.operation.outcome,'known_success');assert.equal(status.data.operation.reconciliation,'none');assert.equal(status.data.pending,true);
++ const count=calls.filter(c=>c.path.endsWith('/scan')).length;
++ assert.equal((await request(path+'/resolve','POST',{expectedVersion:version,confirmed:true,reason:'Synthetic operator cannot infer an offline resolution from success metadata alone.'},'auditor')).status,409);
++ assert.equal(calls.filter(c=>c.path.endsWith('/scan')).length,count);assert.equal((await Project.findOne({projectID}).lean())!.a11yReview[0].remedyWritePending,true);
++});
++
++test('bounded durable resolution markers are retained and refuse further clearing at the explicit quota',async()=>{
++ const f=await quarantinedResolution();
++ await Project.updateOne({projectID},{$set:{remedyResolutionCommits:Array.from({length:1000},(_,i)=>({id:randomUUID(),localID:`historical-${i}`,actor:users.auditor,at:new Date(i),evidenceVersion:i}))}});
++ const original=await Project.findOne({projectID}).select('+remedyResolutionCommits').lean(),count=calls.length;
++ const response=await request(f.path,'POST',f.body,'auditor');assert.equal(response.status,409);assert.match(response.data.errMsg,/1,000/);assert.equal(calls.length,count);
++ assert.deepEqual(await Project.findOne({projectID}).select('+remedyResolutionCommits').lean(),original);
++});
+diff --git a/server/models/project.ts b/server/models/project.ts
+index 3e79820f..3466a1ef 100644
+--- a/server/models/project.ts
++++ b/server/models/project.ts
+@@ -138,6 +138,7 @@ export interface ProjectInterfaceRaw {
+   rdmpCurrentStep: string;
+   a11yReview: (typeof a11ySectionReviewSchema)[];
+   remedyOperations: unknown[];
++  remedyResolutionCommits?: unknown[];
+   harvestReqID?: string;
+   flag?: "libretexts" | "campusadmin" | "lead" | "liaison";
+   flagDescrip?: string;
+@@ -374,6 +375,7 @@ const ProjectSchema = new Schema<ProjectInterface>(
+     a11yReview: [a11ySectionReviewSchema],
+     // Durable intent/outcome events survive TOC section replacement; excluded from ordinary reads.
+     remedyOperations: { type: [Schema.Types.Mixed], select: false, default: [] },
++    remedyResolutionCommits: {type:[Schema.Types.Mixed],select:false,default:undefined},
+     /**
+      * Latest ADAPT accessibility scan summary attached to this Project.
+      */
+diff --git a/server/util/a11yreviewutils.ts b/server/util/a11yreviewutils.ts
+index 1efcdc98..3b767537 100644
+--- a/server/util/a11yreviewutils.ts
++++ b/server/util/a11yreviewutils.ts
+@@ -49,6 +49,8 @@ export const a11ySectionReviewSchema = {
+     remedyWritePending: Boolean,
+     remedyReviewedPreview: Schema.Types.Mixed,
+     remedyPendingOperation: String,
++    remedyResolutionEpoch: String,
++    remedyLastResolution: Schema.Types.Mixed,
+     remedyLastScannedAt: Date,
+     remedyFindings: Array,
+     remedyWcagSummary: Object,
+diff --git a/server/util/conformance.test.ts b/server/util/conformance.test.ts
+index 6c09c27d..c5773add 100644
+--- a/server/util/conformance.test.ts
++++ b/server/util/conformance.test.ts
+@@ -66,3 +66,12 @@ test('projection preserves first matching review, stale history and exact scope/
+  assert.equal(report.pages[3].criteria[0].status,'stale');
+  assert.equal(report.verifiedCriteria,1);
+ });
++
++test('an administrative resolution epoch invalidates old human reviews even when canonical bytes recur',()=>{
++ const s=section(),fingerprint=pageFingerprint(s),review={_id:'old',sectionID:'page-1',criterionID:'1.1.1',fingerprint,scopeVersion:scope.version,status:'pass'};
++ assert.equal(conformanceReport({a11yReview:[s]},scope,[review],[],now).verifiedCriteria,1);
++ (s as any).remedyResolutionEpoch='synthetic-resolution-epoch';
++ assert.notEqual(pageFingerprint(s),fingerprint);
++ const report=conformanceReport({a11yReview:[s]},scope,[review],[],now);
++ assert.equal(report.verifiedCriteria,0);assert.equal(report.pages[0].criteria[0].status,'stale');
++});
+diff --git a/server/util/conformance.ts b/server/util/conformance.ts
+index 58bd82c0..05b31896 100644
+--- a/server/util/conformance.ts
++++ b/server/util/conformance.ts
+@@ -7,7 +7,9 @@ export function pageFingerprint(section: any) {
+   if (section.remedyWritePending) return null;
+   const w = section.wcagReview, r = w?.rendered;
+   if (!w?.sourceHash || r?.sourceHash !== w.sourceHash || !r?.renderedHash || !r?.platformHash) return null;
+-  return hash([section.sectionURL,w.sourceHash,r.renderedHash,r.platformHash,r.browser,r.axeVersion]);
++  const identity=[section.sectionURL,w.sourceHash,r.renderedHash,r.platformHash,r.browser,r.axeVersion];
++  if(section.remedyResolutionEpoch)identity.push(section.remedyResolutionEpoch);
++  return hash(identity);
+ }
+ export function scanBlockers(section: any, now = Date.now()) {
+   const w = section.wcagReview, r = w?.rendered, blockers: string[] = [];
+-- 
+2.54.0 (Apple Git-157)
+
