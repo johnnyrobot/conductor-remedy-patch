@@ -1,7 +1,7 @@
 # conductor-remedy-patch
 
 The **Conductor side** of the LibreTexts Remedy accessibility matrix, shipped as
-target-specific twenty-patch `git am` series against upstream Conductor, with
+target-specific twenty-one-patch `git am` series against upstream Conductor, with
 the original sixteen-patch delivery retained for history.
 
 This repository contains no Conductor source of its own. It is a delivery
@@ -20,10 +20,10 @@ targets selected by the Chief, not observations of the running production versio
 
 | Target | Manifest | Resulting source tree |
 |---|---|---|
-| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `13310416ccc17299cf0943cfa83f1c4871fa8c85` |
-| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `24b1a1bf096baa1759cc8745b4a30547e0d4ac1c` |
+| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `bec06bcc8e480068d4517396536e82ed68729e86` |
+| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `6d403848f76161624ccaa9051cc191dbfd16876d` |
 
-Each manifest lists its own twenty ordered patches and SHA-256 checksums. Use
+Each manifest lists its own twenty-one ordered patches and SHA-256 checksums. Use
 Node 22 and a fresh **detached** clone; the command refuses a wrong base, dirty
 checkout, active branch, changed patch or escaping path before application.
 
@@ -49,6 +49,10 @@ explain the preserved upstream scripts, target-specific test corrections and ope
 release gates. **Production readiness is false** in both manifests. Patch0019 implements default-disabled, server-enforced tenant opt-in and explicit
 engine configuration. Patch0020 supplies signed operations and read-only status lookup; production
 release still requires the remaining operational/deployment gates. Never deploy an image selected by `latest`.
+
+[LT-156 indexed projection evidence](docs/releases/lt156-indexed-projection.md) records
+patch0021, unchanged ordered selection and same-host sizing. Bounded responses
+and history storage remain LT-157 release gates.
 
 [LT-140 signed-operation and integration evidence](docs/releases/lt140-reviewed-operations.md)
 records patch0020, actual three-service HTTP validation and remaining gates.

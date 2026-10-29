@@ -1,0 +1,5 @@
+{"pages":10,"reviews":500,"milliseconds":[0.89,0.75,0.29],"outputBytes":402974,"verified":500}
+{"pages":50,"reviews":2500,"milliseconds":[2.04,1.53,0.86],"outputBytes":2016096,"verified":2500}
+{"pages":100,"reviews":5000,"milliseconds":[3.09,1.78,2.41],"outputBytes":4032496,"verified":5000}
+{"pages":250,"reviews":12500,"milliseconds":[4.15,3.16,3.91],"outputBytes":10097448,"verified":12500}
+{"pages":500,"reviews":25000,"milliseconds":[10.31,6.34,5.89],"outputBytes":20205698,"verified":25000}

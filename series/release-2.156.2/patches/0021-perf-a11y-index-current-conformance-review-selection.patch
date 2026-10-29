@@ -1,0 +1,155 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: johnnyrobot <174211481+johnnyrobot@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 07:21:29 -0700
+Subject: [PATCH] perf(a11y): index current conformance review selection
+ (LT-156)
+
+---
+ server/integration/remedy-routes.test.ts | 31 ++++++++++++++++++
+ server/scripts/benchmarkConformance.ts   | 11 +++++++
+ server/util/conformance.test.ts          | 40 ++++++++++++++++++++++++
+ server/util/conformance.ts               | 19 +++++++++--
+ 4 files changed, 98 insertions(+), 3 deletions(-)
+ create mode 100644 server/scripts/benchmarkConformance.ts
+
+diff --git a/server/integration/remedy-routes.test.ts b/server/integration/remedy-routes.test.ts
+index c4292ace..72e60408 100644
+--- a/server/integration/remedy-routes.test.ts
++++ b/server/integration/remedy-routes.test.ts
+@@ -666,3 +666,34 @@ test('matching full SHA256 source evidence is preserved by authoritative preview
+   assert.equal(stored.wcagReview.sourceHash, full); assert.equal(stored.wcagReview.rendered.sourceHash, full);
+   assert.equal(stored.remedyEvidenceVersion, undefined);
+ });
++
++test('indexed projection and authenticated complete export retain ordered current and stale history semantics', async()=>{
++ const original=(await request(base+'/conformance')).data.report;
++ const Records=mongoose.connection.db!.collection('conformancerecords');
++ const sameTime=new Date('2026-01-01T00:00:00Z');
++ const added=criteria.flatMap((criterion,i)=>Array.from({length:5},(_,j)=>({
++  projectID,kind:'review',sectionID,criterionID:criterion.id,actor:users.editor,at:new Date(2000+j),createdAt:sameTime,
++  _id:new mongoose.Types.ObjectId((1000+i*5+j).toString(16).padStart(24,'0')),
++  data:{criterionID:criterion.id,scopeVersion:j===4?'old-scope':original.scope.version,
++   fingerprint:j===3||i%7===0?'old-source':original.pages[0].fingerprint,
++   status:j===2?'fail':j===1?'not_applicable':'pass',notes:`Ordered synthetic evidence ${i}/${j}`},
++ })));
++ await Records.insertMany(added);
++ // Scope stays current and the baseline review is removed only in this owned fixture.
++ const oldReview=await Records.findOne({projectID,kind:'review',createdAt:{$ne:sameTime}});
++ if(oldReview) await Records.deleteOne({_id:oldReview._id});
++ const history=await Records.find({projectID,kind:'review'}).sort({createdAt:-1,_id:-1}).toArray();
++ const response=await request(base+'/conformance');assert.equal(response.status,200);
++ for(const criterion of response.data.report.pages[0].criteria) {
++  const candidates=history.filter(r=>r.sectionID===sectionID&&r.criterionID===criterion.id);
++  const selected=candidates.find(r=>r.data.scopeVersion===original.scope.version&&r.data.fingerprint===original.pages[0].fingerprint);
++  assert.equal(criterion.status,selected?.data.status||'stale');
++  assert.equal(criterion.review?._id,selected?._id.toString()||undefined);
++ }
++ const exported=await request(base+'/conformance/report');assert.equal(exported.status,200);
++ const {generatedAt:ignored,...body}=response.data.report;
++ const {generatedAt:ignoredExport,...download}=exported.data;
++ assert.deepEqual(download,body);
++ assert.equal(await Records.countDocuments({projectID,kind:'review'}),250);
++ for(const user of ['outsider','anonymous']) assert.equal((await request(base+'/conformance/report','GET',undefined,user)).status,user==='outsider'?403:401);
++});
+diff --git a/server/scripts/benchmarkConformance.ts b/server/scripts/benchmarkConformance.ts
+new file mode 100644
+index 00000000..a27df574
+--- /dev/null
++++ b/server/scripts/benchmarkConformance.ts
+@@ -0,0 +1,11 @@
++/** Synthetic same-host sizing probe; timings are evidence, never a CI threshold. */
++import { conformanceReport, criteria, pageFingerprint } from '../util/conformance.js';
++const now=Date.now(),at=new Date(now).toISOString();
++const scope={version:'synthetic',boundaries:'All synthetic full pages',processes:'Read all synthetic pages'};
++for(const count of [10,50,100,250,500]) {
++ const sections=Array.from({length:count},(_,i)=>({_id:`p${i}`,sectionTitle:`Synthetic ${i}`,sectionURL:`https://fixture.invalid/${i}`,wcagReview:{sourceHash:`s${i}`,scannedAt:at,criteria:criteria.map(c=>({...c,status:'pass'})),rendered:{sourceHash:`s${i}`,renderedHash:'r',platformHash:'p',state:'complete',scannedAt:at,violations:[]}}}));
++ const reviews=sections.flatMap(s=>criteria.map(c=>({_id:`${s._id}-${c.id}`,sectionID:s._id,criterionID:c.id,fingerprint:pageFingerprint(s),scopeVersion:scope.version,status:'pass'})));
++ const milliseconds:number[]=[];let report:any;
++ for(let i=0;i<3;i++){const start=performance.now();report=conformanceReport({projectID:'synthetic',a11yReview:sections},scope,reviews,[],now);milliseconds.push(+(performance.now()-start).toFixed(2));}
++ process.stdout.write(JSON.stringify({pages:count,reviews:reviews.length,milliseconds,outputBytes:Buffer.byteLength(JSON.stringify(report)),verified:report.verifiedCriteria})+'\n');
++}
+diff --git a/server/util/conformance.test.ts b/server/util/conformance.test.ts
+index 1a61cdb8..6c09c27d 100644
+--- a/server/util/conformance.test.ts
++++ b/server/util/conformance.test.ts
+@@ -26,3 +26,43 @@ test('review validates actual checklists, evidence, N/A rationale and concurrenc
+  assert.equal(validateReview(body,s,scope).status,'pass');
+  for(const patch of [{checks:[]},{confirmed:false},{notes:'ok'},{fingerprint:'old'},{scopeVersion:'old'},{evidenceURLs:['javascript:alert(1)']},{status:'not_applicable',reason:''}])assert.throws(()=>validateReview({...body,...patch},s,scope));
+ });
++
++// The previous filter/find selector is an independent compatibility oracle. Input
++// order is authoritative (the route supplies createdAt/_id descending), not at.
++test('projection preserves first matching review, stale history and exact scope/fingerprint semantics',()=>{
++ const s=section(), other={...section(),_id:{toString:()=> 'page-2'}}, failed={...section(),_id:'failed',remedyError:'scan failed'};
++ const pending={...section(),_id:'pending',remedyWritePending:true};
++ const project={projectID:'ordered',a11yReview:[s,other,failed,pending,{_id:'missing'}]};
++ const fingerprint=pageFingerprint(s);
++ const history:any[]=[
++  {_id:'stale-newest',sectionID:'page-1',criterionID:'1.1.1',fingerprint:'old',scopeVersion:scope.version,status:'pass'},
++  {_id:'scope-newest',sectionID:'page-1',criterionID:'1.1.1',fingerprint,scopeVersion:'old',status:'pass'},
++  {_id:'first-current',sectionID:'page-1',criterionID:'1.1.1',fingerprint,scopeVersion:scope.version,status:'fail',at:'2000-01-01'},
++  {_id:'later-current',sectionID:'page-1',criterionID:'1.1.1',fingerprint,scopeVersion:scope.version,status:'pass',at:'2099-01-01'},
++  {_id:'other-current',sectionID:other._id,criterionID:'1.1.1',fingerprint,scopeVersion:scope.version,status:'not_applicable'},
++  {_id:'failed-current',sectionID:'failed',criterionID:'1.1.1',fingerprint,scopeVersion:scope.version,status:'pass'},
++  {_id:'pending-old',sectionID:'pending',criterionID:'1.1.1',fingerprint,scopeVersion:scope.version,status:'pass'},
++  {_id:'pending-null',sectionID:'pending',criterionID:'1.2.1',fingerprint:null,scopeVersion:scope.version,status:'fail'},
++  {_id:'unknown-criterion',sectionID:'page-1',criterionID:'unknown',fingerprint,scopeVersion:scope.version,status:'pass'},
++ ];
++ for(const activeScope of [scope,{...scope,version:'old'},undefined]) for(const reviews of [history,[...history].reverse(),[],...Array.from({length:12},(_,i)=>history.slice(i%history.length).concat(history.slice(0,i%history.length)))]) {
++  const report=conformanceReport(project,activeScope,reviews,[],now);
++  let verified=0;
++  for(let i=0;i<project.a11yReview.length;i++) for(const result of report.pages[i].criteria) {
++   const page=project.a11yReview[i], fp=pageFingerprint(page);
++   const candidates=reviews.filter(r=>String(r.sectionID)===String(page._id)&&r.criterionID===result.id);
++   const selected=candidates.find(r=>r.fingerprint===fp&&r.scopeVersion===activeScope?.version);
++   const status=selected?selected.status:candidates.length?'stale':'unreviewed';
++   assert.equal(result.status,status);assert.equal(result.review,selected||null);
++   if(!scanBlockers(page,now).length&&['pass','not_applicable'].includes(status)) verified++;
++  }
++  assert.equal(report.verifiedCriteria,verified);
++  const signed=conformanceReport(project,activeScope,reviews,[{digest:report.digest}],now);
++  assert.equal(signed.digest,report.digest);
++ }
++ const report=conformanceReport(project,scope,history,[],now);
++ assert.equal(report.pages[0].criteria[0].review._id,'first-current');
++ assert.equal(report.pages[1].criteria[0].status,'not_applicable');
++ assert.equal(report.pages[3].criteria[0].status,'stale');
++ assert.equal(report.verifiedCriteria,1);
++});
+diff --git a/server/util/conformance.ts b/server/util/conformance.ts
+index f7b2b2bc..58bd82c0 100644
+--- a/server/util/conformance.ts
++++ b/server/util/conformance.ts
+@@ -38,13 +38,26 @@ export function validateReview(body:any, section:any, scope:any) {
+ }
+ export function conformanceReport(project:any, scope:any, reviews:any[], signoffs:any[], now=Date.now()) {
+   const sections=project.a11yReview || [];
++  // Index once in the supplied history order. A later record must never replace
++  // the first match; timestamps and IDs are ordered by the caller, not here.
++  const reviewIndex = new Map<string, Map<string, {current: Map<unknown, any>}>>();
++  for (const review of reviews) {
++    const sectionID = String(review.sectionID);
++    let page = reviewIndex.get(sectionID);
++    if (!page) reviewIndex.set(sectionID, page = new Map());
++    let criterion = page.get(review.criterionID);
++    if (!criterion) page.set(review.criterionID, criterion = {current: new Map()});
++    if (review.scopeVersion === scope?.version && !criterion.current.has(review.fingerprint)) {
++      criterion.current.set(review.fingerprint, review);
++    }
++  }
+   let verified=0;
+   const pages=sections.map((s:any)=>{
+     const fingerprint=pageFingerprint(s), blockers=scanBlockers(s,now);
+     const results=criteria.map(c=>{
+-      const candidates=reviews.filter(r=>String(r.sectionID)===String(s._id) && r.criterionID===c.id);
+-      const current=candidates.find(r=>r.fingerprint===fingerprint && r.scopeVersion===scope?.version);
+-      const status=current ? current.status : candidates.length?'stale':'unreviewed';
++      const history=reviewIndex.get(String(s._id))?.get(c.id);
++      const current=history?.current.get(fingerprint);
++      const status=current ? current.status : history?'stale':'unreviewed';
+       if (!blockers.length && ['pass','not_applicable'].includes(status)) verified++;
+       return {...c,status,review:current || null};
+     });
+-- 
+2.54.0 (Apple Git-157)
+
