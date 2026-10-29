@@ -199,7 +199,6 @@ try {
       appDir + ":/fixture:ro",
       image,
     ]);
-    owned.push(app);
     await ready(app);
     const processOne = run(
       "entrypoint-" + mode,
