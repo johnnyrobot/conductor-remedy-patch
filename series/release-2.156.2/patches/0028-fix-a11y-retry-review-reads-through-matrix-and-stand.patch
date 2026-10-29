@@ -1,0 +1,133 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: johnnyrobot <174211481+johnnyrobot@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 12:55:15 -0700
+Subject: [PATCH] fix(a11y): retry review reads through matrix and standalone
+ entry (LT-176)
+
+---
+ client/src/api.remedy.test.ts                 |  8 ++++
+ client/src/api.ts                             |  9 +++-
+ .../ProjectAccessibility.capability.test.jsx  | 44 +++++++++++++++++++
+ .../projects/ProjectAccessibility.jsx         |  7 +--
+ 4 files changed, 63 insertions(+), 5 deletions(-)
+ create mode 100644 client/src/api.remedy.test.ts
+
+diff --git a/client/src/api.remedy.test.ts b/client/src/api.remedy.test.ts
+new file mode 100644
+index 00000000..d0733bf5
+--- /dev/null
++++ b/client/src/api.remedy.test.ts
+@@ -0,0 +1,8 @@
++import {test,expect,vi,afterEach} from 'vitest';
++import api from './api';
++afterEach(()=>vi.unstubAllGlobals());
++test('standalone capability request reaches the authenticated API without Platform initialization',async()=>{
++ const fetcher=vi.fn(async()=>({ok:true,json:async()=>({err:false,available:true,capabilities:{scan:true,preview:true,mutate:false,operation_status:false}})}));vi.stubGlobal('fetch',fetcher);
++ const result=await api.getProjectRemedyCapability('project123');expect(result.data.available).toBe(true);
++ expect(fetcher).toHaveBeenCalledWith('/api/v1/project/accessibility/remedy/health?projectID=project123',expect.objectContaining({credentials:'include',headers:{'X-Requested-With':'XMLHttpRequest'}}));
++});
+diff --git a/client/src/api.ts b/client/src/api.ts
+index ab2cb404..d4728b35 100644
+--- a/client/src/api.ts
++++ b/client/src/api.ts
+@@ -141,8 +141,13 @@ export type ProjectRemedyCapability = ConductorBaseResponse & {
+ };
+ 
+ class API {
+-  getProjectRemedyCapability(projectID: string) {
+-    return axios.get<ProjectRemedyCapability>('/project/accessibility/remedy/health', {params: {projectID}});
++  async getProjectRemedyCapability(projectID: string) {
++    const response = await fetch(`${this.BASE_URL}/project/accessibility/remedy/health?projectID=${encodeURIComponent(projectID)}`, {
++      credentials: 'include', headers: {'X-Requested-With': 'XMLHttpRequest'},
++    });
++    const data: ProjectRemedyCapability = await response.json();
++    if (!response.ok || data.err) throw Error('Remedy availability could not be checked.');
++    return {data};
+   }
+ 
+   private readonly BASE_URL: string =
+diff --git a/client/src/components/projects/ProjectAccessibility.capability.test.jsx b/client/src/components/projects/ProjectAccessibility.capability.test.jsx
+index 8f811828..602310ee 100644
+--- a/client/src/components/projects/ProjectAccessibility.capability.test.jsx
++++ b/client/src/components/projects/ProjectAccessibility.capability.test.jsx
+@@ -161,6 +161,50 @@ test("mounted review-only matrix preserves preview and reviewer tools without en
+     await act(async () => fireEvent.click(fix));
+     const preview = await screen.findByRole('button', { name: 'Preview changes' });
+     await act(async () => fireEvent.click(preview));
++    await waitFor(()=>expect(axios.post.mock.calls.some(([path])=>path.endsWith('/preview'))).toBe(true));
++    expect(screen.queryByLabelText('I reviewed this preview and want to apply these changes.')).toBeNull();
++    expect(screen.getByRole('button',{name:'Apply to LibreTexts'})).toBeDisabled();
++    expect(container.textContent).toContain('normal book editor');
++    expect(container.querySelector('.conformance-review')).not.toBeNull();
++    expect(axios.post.mock.calls.some(([path])=>path.endsWith('/apply'))).toBe(false);
++  } finally { await act(async () => root.unmount()); container.remove(); }
++});
++
++test("mounted degraded review-only matrix deliberately retries through its readiness helper",async()=>{
++  axios.get.mockReset(); axios.post.mockReset(); axios.put.mockReset();
++  const expired=false,evidenceChanged=false;
++  let fingerprint = 'source-A';
++  const finding = { id: 'finding1', fixable: true, message: 'Synthetic missing description', ruleId: 'img-alt', selector: 'img' };
++  const review = { criteria: [{ id: '1.1.1', title: 'Non-text Content', principle: 'Perceivable', status: 'fail', evidence: [finding] }], summary: { failCount: 1 } };
++  const section = { _id: 'section-1', pageID: '123', sectionTitle: 'Synthetic page', sectionURL: 'https://dev.libretexts.org/Sandboxes/johnnyphung/test', wcagReview: review };
++  const project = { projectID: 'fixture01', title: 'Fixture project', members: ['editor'], leads: [], liaisons: [], auditors: [], tags: [] };
++  axios.get.mockImplementation(async path => ({ data: path === '/project' ? { err: false, project }
++    : path.includes('remedy/health') ? { err: false, available: false, readRetry: true, profile:{contract:"cxone-review-v1",name:"review-only"}, capabilities: { scan: false, preview: true, mutate: false, operation_status:false } }
++    : { err: false, a11yReview: [section] } }));
++  axios.put.mockResolvedValue({ data: { err: false } });
++  axios.post.mockImplementation(async path => { if (path.endsWith('/preview') && evidenceChanged) fingerprint = null; return { data: path.endsWith('/scan') ? { err: false, findings: [finding], wcag_review: review }
++    : path.endsWith('/preview') ? { err: false, before_html: '<p>old</p>', after_html: '<p>new</p>', diff: '-old\n+new', preview_hash: 'hash', preview_token: 'remote-token', evidenceChanged, localReviewID: 'matrix-stored-review', review_expires_at: Math.floor(Date.now()/1000)+(expired ? -1 : 300) }
++    : { err: false, applied: false, outcome: 'not_attempted', reason: 'no_change' } }; });
++  const reviewerPage=()=>({sectionID:'page1',title:'Reviewer page',url:section.sectionURL,fingerprint,blockers:[],criteria:[{id:'1.1.1',title:'Non-text Content',status:'unreviewed',checklist:['Compare source images']}]});
++  vi.stubGlobal('fetch', vi.fn(async path => ({ ok: true, json: async () => path.includes('/conformance/pages/') ? (path.includes('/criteria/') ? {err:false,criterion:reviewerPage().criteria[0]} : {err:false,page:reviewerPage()}) : path.endsWith('/conformance')
++    ? { err: false, canEdit: true, report: { scope: { version: 'scope-1' }, pages: [{ sectionID: 'page1', title: 'Reviewer page', url: section.sectionURL, fingerprint, blockers: [], criteria: [{ id: '1.1.1', title: 'Non-text Content', status: 'unreviewed', checklist: ['Compare source images'] }] }], totalCriteria: 1, verifiedCriteria: 0, verificationPercent: 0, status: 'verification_pending', readyForSignoff: false } }
++    : { err: false, canEdit: true, items: [], users: [], sections: [], candidates: [] } })));
++  const container = document.createElement('div'); document.body.appendChild(container); const root = createRoot(container);
++  try {
++    await act(async () => root.render(<MemoryRouter><ProjectAccessibility match={{ params: { id: 'fixture01' } }} location={{ search: '' }} /></MemoryRouter>));
++    await act(async () => {});
++    if (evidenceChanged) {
++      fireEvent.change(await screen.findByLabelText('Page to evaluate'), { target: { value: 'page1' } });
++      fireEvent.click(await screen.findByLabelText('Compare source images'));
++      fireEvent.change(screen.getByLabelText(/Test environment/), { target: { value: 'Synthetic screen reader' } });
++      fireEvent.change(screen.getByLabelText(/Evidence and results/), { target: { value: 'Reviewed the original source images before preview.' } });
++      fireEvent.click(screen.getByLabelText(/I performed this review/));
++    }
++    const fix = (await screen.findAllByRole('button', { name: 'Fix 1' }))[0];
++    await act(async () => fireEvent.click(fix));
++    const preview = await screen.findByRole('button', { name: 'Preview changes' });
++    await act(async () => fireEvent.click(preview));
++    await waitFor(()=>expect(axios.post.mock.calls.some(([path])=>path.endsWith('/preview'))).toBe(true));
+     expect(screen.queryByLabelText('I reviewed this preview and want to apply these changes.')).toBeNull();
+     expect(screen.getByRole('button',{name:'Apply to LibreTexts'})).toBeDisabled();
+     expect(container.textContent).toContain('normal book editor');
+diff --git a/client/src/components/projects/ProjectAccessibility.jsx b/client/src/components/projects/ProjectAccessibility.jsx
+index ad483c42..4215a48d 100644
+--- a/client/src/components/projects/ProjectAccessibility.jsx
++++ b/client/src/components/projects/ProjectAccessibility.jsx
+@@ -1160,10 +1160,11 @@ const ProjectAccessibility = (props) => {
+         }
+     };
+ 
+-    const ensureRemedyServerReady = async () => {
++    const ensureRemedyServerReady = async (forWrite = false) => {
+         const res = await axios.get('/project/accessibility/remedy/health', { params: { projectID: props.match.params.id } });
+         setRemedyCapability({ ...res.data, projectID: props.match.params.id });
+-        if (res.data.err || !res.data.available) {
++        if (res.data.err || !(res.data.available || (!forWrite && res.data.readRetry === true))
++            || (forWrite && res.data.capabilities?.mutate !== true)) {
+             throw (new Error(res.data.message || res.data.errMsg || 'Remedy Server is not ready.'));
+         }
+     };
+@@ -1334,7 +1335,7 @@ const ProjectAccessibility = (props) => {
+         setApplyResult(null);
+         setFixReviewed(false);
+         try {
+-            await ensureRemedyServerReady();
++            await ensureRemedyServerReady(true);
+             const findingIDs = selectedFindingIDs.length > 0
+                 ? selectedFindingIDs
+                 : getSectionFixableFindings(activeFixSection._id).map((finding) => finding.id);
+-- 
+2.54.0 (Apple Git-157)
+

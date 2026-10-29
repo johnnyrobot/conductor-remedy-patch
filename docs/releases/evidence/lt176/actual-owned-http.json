@@ -1,0 +1,36 @@
+{
+  "staging": {
+    "conductor": "compiled Node22 real router/login/JWT/Session/Mongo",
+    "serverCommit": "3fa8ed592bbe41f1f1a9adab4888dfaa1a9e2d71",
+    "bridgeCommit": "28f37e2b57d3cf05308c19f5e363ff6f782cd837",
+    "contract": "cxone-review-v1",
+    "auth": true,
+    "sourceScanAndPreview": true,
+    "noConductorSignerConfigured": true,
+    "craftedWritesDeniedBeforeIntent": true,
+    "cryptographicallyValidBridgeApplyRestoreDenied": true,
+    "previewNotConsumed": true,
+    "manualChangesRequireFreshEvidence": true,
+    "requiredReadFailureAndConductorRetryRecovery": true,
+    "mutationAttempts": 0,
+    "humanVerifiedCriteria": 0,
+    "syntheticExternalOnly": true
+  },
+  "release": {
+    "conductor": "compiled Node22 real router/login/JWT/Session/Mongo",
+    "serverCommit": "3fa8ed592bbe41f1f1a9adab4888dfaa1a9e2d71",
+    "bridgeCommit": "28f37e2b57d3cf05308c19f5e363ff6f782cd837",
+    "contract": "cxone-review-v1",
+    "auth": true,
+    "sourceScanAndPreview": true,
+    "noConductorSignerConfigured": true,
+    "craftedWritesDeniedBeforeIntent": true,
+    "cryptographicallyValidBridgeApplyRestoreDenied": true,
+    "previewNotConsumed": true,
+    "manualChangesRequireFreshEvidence": true,
+    "requiredReadFailureAndConductorRetryRecovery": true,
+    "mutationAttempts": 0,
+    "humanVerifiedCriteria": 0,
+    "syntheticExternalOnly": true
+  }
+}

@@ -1,0 +1,337 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: johnnyrobot <174211481+johnnyrobot@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 12:44:45 -0700
+Subject: [PATCH] fix(a11y): permit explicit read recovery without enabling
+ writes (LT-176)
+
+---
+ client/src/api.ts                             | 10 ++++++++
+ .../projects/ProjectAccessibility.jsx         | 23 ++++++++++---------
+ .../projects/RemediationPageActions.tsx       |  6 ++---
+ .../projects/RemediationWorkQueue.tsx         | 16 +++----------
+ .../components/projects/ReviewOnly.test.tsx   | 10 ++++++++
+ client/src/remediation-queue-entry.tsx        | 13 ++++++++++-
+ docs/remediation-integration.md               |  2 +-
+ server/api/projects.js                        |  2 +-
+ server/api/remediationactions.ts              |  2 +-
+ server/integration/remedy-routes.test.ts      | 12 +++++++++-
+ server/util/remedyCapabilities.ts             |  1 +
+ 11 files changed, 65 insertions(+), 32 deletions(-)
+
+diff --git a/client/src/api.ts b/client/src/api.ts
+index 0b7be89f..4bb96e86 100644
+--- a/client/src/api.ts
++++ b/client/src/api.ts
+@@ -147,7 +147,17 @@ import type { CitationScanData } from "./components/projects/References/model";
+  * have been converted to use this class yet, but we still want global config to apply
+  */
+ 
++export type ProjectRemedyCapability = ConductorBaseResponse & {
++  available: boolean;
++  readRetry?: boolean;
++  capabilities: {scan: boolean; preview: boolean; mutate: boolean; operation_status: boolean};
++};
++
+ class API {
++  getProjectRemedyCapability(projectID: string) {
++    return axios.get<ProjectRemedyCapability>('/project/accessibility/remedy/health', {params: {projectID}});
++  }
++
+   private readonly BASE_URL: string =
+     import.meta.env.MODE === "development"
+       ? `${import.meta.env.VITE_DEV_BASE_URL}/api/v1`
+diff --git a/client/src/components/projects/ProjectAccessibility.jsx b/client/src/components/projects/ProjectAccessibility.jsx
+index 5aa5cc05..ad483c42 100644
+--- a/client/src/components/projects/ProjectAccessibility.jsx
++++ b/client/src/components/projects/ProjectAccessibility.jsx
+@@ -551,6 +551,7 @@ const ProjectAccessibility = (props) => {
+     const [remedyCapability, setRemedyCapability] = useState({ available: false, message: 'Checking Remedy availability.' });
+     const [capabilityCheck, setCapabilityCheck] = useState(0);
+     const remedyAvailable = remedyCapability.projectID === props.match.params.id && remedyCapability.available === true;
++    const remedyReadAllowed = remedyAvailable || (remedyCapability.projectID === props.match.params.id && remedyCapability.readRetry === true);
+     const remedyMutationAvailable = remedyAvailable && remedyCapability.capabilities?.mutate === true;
+     const remedyRecoveryAvailable = remedyCapability.projectID === props.match.params.id && remedyCapability.capabilities?.operation_status === true;
+     const [showScanModal, setShowScanModal] = useState(false);
+@@ -993,7 +994,7 @@ const ProjectAccessibility = (props) => {
+     };
+ 
+     const openScanModal = () => {
+-        if (!remedyAvailable) return;
++        if (!remedyReadAllowed) return;
+         setScanProgress({
+             total: reviewSections.filter(hasRemedyScanTarget).length,
+             completed: 0,
+@@ -1061,7 +1062,7 @@ const ProjectAccessibility = (props) => {
+     };
+ 
+     const scanWithRemedy = async () => {
+-        if (!remedyAvailable) return;
++        if (!remedyReadAllowed) return;
+         const allSections = reviewSections.filter(hasRemedyScanTarget);
+         const failedSectionIDs = new Set(scanFailures
+             .map((failure) => failure.sectionID)
+@@ -1242,7 +1243,7 @@ const ProjectAccessibility = (props) => {
+     };
+ 
+     const openFixModal = async (section) => {
+-        if (!remedyAvailable) return;
++        if (!remedyReadAllowed) return;
+         const {
+             section: refreshedSection,
+             findings: fixableFindings,
+@@ -1420,7 +1421,7 @@ const ProjectAccessibility = (props) => {
+     const selectedFixableFindings = activeFixFindings.filter((finding) => selectedFindingIDs.includes(finding.id));
+     const hasFailedScanSections = scanFailures.some((failure) => typeof (failure.sectionID) === 'string' && failure.sectionID.length > 0);
+     const isPipelineFixMode = remedyFixMode === 'pipeline';
+-    const canRunRemedyFixActions = remedyAvailable && activeFixSection && !fixActionsBlocked;
++    const canRunRemedyFixActions = remedyReadAllowed && activeFixSection && !fixActionsBlocked;
+     const canPreviewRemedyFix = canRunRemedyFixActions && (isPipelineFixMode || selectedFindingIDs.length > 0);
+     const canApplyRemedyFix = remedyMutationAvailable && canRunRemedyFixActions
+         && previewData?.localReviewID
+@@ -1546,7 +1547,7 @@ const ProjectAccessibility = (props) => {
+                                                 <div className='right-flex wcag-summary-actions'>
+                                                     <Button
+                                                         color='green'
+-                                                        disabled={!remedyAvailable || reviewSections.length === 0 || scanLoading}
++                                                        disabled={!remedyReadAllowed || reviewSections.length === 0 || scanLoading}
+                                                         loading={scanLoading}
+                                                         onClick={openScanModal}
+                                                     >
+@@ -1585,19 +1586,19 @@ const ProjectAccessibility = (props) => {
+                                                 <p>{remedyCapability.message}</p>
+                                                 <Button onClick={() => setCapabilityCheck(value => value + 1)}>Check Remedy availability</Button>
+                                             </div>}
+-                                            {remedyAvailable && <>
++                                            {remedyReadAllowed && <>
+                                                 {!remedyMutationAvailable && <p role='status'>Automatic edits are unavailable. Review the scan and proposed changes, edit through the normal book editor, then run a fresh scan. Previews and task checkboxes do not establish a fix or conformance. AI and rendered-browser features require their own configured providers.</p>}
+-                                                <ConformanceReview projectID={props.match.params.id} sections={reviewSections} onScanSaved={() => getReviewSections({ persistScore: true })} />
+-                                                <RemediationWorkQueue projectID={props.match.params.id} capabilities={remedyCapability.capabilities} onScanSaved={() => getReviewSections({ persistScore: true })} />
++                                                <ConformanceReview projectID={props.match.params.id} sections={reviewSections} onScanSaved={() => { getReviewSections({ persistScore: true }); setCapabilityCheck(value => value + 1); }} />
++                                                <RemediationWorkQueue projectID={props.match.params.id} capabilities={remedyCapability.capabilities} readRetry={remedyCapability.readRetry === true} onScanSaved={() => { getReviewSections({ persistScore: true }); setCapabilityCheck(value => value + 1); }} />
+                                             </>}
+-                                            {!remedyAvailable && remedyRecoveryAvailable && <RemediationWorkQueue projectID={props.match.params.id} capabilities={remedyCapability.capabilities} recoveryOnly />}
++                                            {!remedyReadAllowed && remedyRecoveryAvailable && <RemediationWorkQueue projectID={props.match.params.id} capabilities={remedyCapability.capabilities} recoveryOnly />}
+                                             <WcagReviewTable
+                                                 sections={reviewSections}
+                                                 getSectionFixableIssueCount={getSectionFixableIssueCount}
+                                                 fixScanSectionID={fixScanSectionID}
+                                                 openFixModal={openFixModal}
+                                                 openAddModal={openAddModal}
+-                                                remedyAvailable={remedyAvailable}
++                                                remedyAvailable={remedyReadAllowed}
+                                             />
+                                             <div className='access-table-outer access-table-legacy-hidden'>
+                                                 <div className='access-table-inner'>
+@@ -1904,7 +1905,7 @@ const ProjectAccessibility = (props) => {
+                                                                                         icon='wrench'
+                                                                                         content={`Fix ${fixableIssueCount}`}
+                                                                                         loading={isLoadingFixFindings}
+-                                                                                        disabled={!remedyAvailable || Boolean(fixScanSectionID)}
++                                                                                        disabled={!remedyReadAllowed || Boolean(fixScanSectionID)}
+                                                                                         onClick={() => openFixModal(item)}
+                                                                                     />
+                                                                                 )}
+diff --git a/client/src/components/projects/RemediationPageActions.tsx b/client/src/components/projects/RemediationPageActions.tsx
+index 6c599ac6..1ef1d6c0 100644
+--- a/client/src/components/projects/RemediationPageActions.tsx
++++ b/client/src/components/projects/RemediationPageActions.tsx
+@@ -3,7 +3,7 @@ import useReviewedPreviewExpiry from './useReviewedPreviewExpiry';
+ import RemedyOperationStatus from './RemedyOperationStatus';
+ import { remedyOutcome } from './remedyOutcome';
+ 
+-export default function RemediationPageActions({ base, section, item, request, refreshed, onScanSaved, close, capabilities = {} }: any) {
++export default function RemediationPageActions({ base, section, item, request, refreshed, onScanSaved, close, capabilities = {}, readRetry = false }: any) {
+   const canMutate = capabilities.mutate === true;
+   const [scan, setScan] = useState<any>(null);
+   const [selected, setSelected] = useState<string[]>([]);
+@@ -98,7 +98,7 @@ export default function RemediationPageActions({ base, section, item, request, r
+     {message && !onScanSaved && <p><button type="button" className="ui button" disabled={busy} onClick={() => window.location.reload()}>Reload matrix from saved scan</button></p>}
+     {lastSnapshot && <p>Recovery snapshot saved: <code>{lastSnapshot}</code></p>}
+     <div className="rq-fields">
+-      <button type="button" className="ui button" disabled={busy || capabilities.scan !== true} onClick={() => act('scan')}>Rescan page</button>
++      <button type="button" className="ui button" disabled={busy || (capabilities.scan !== true && !readRetry)} onClick={() => act('scan')}>Rescan page</button>
+       {canMutate && <button type="button" className="ui button" disabled={busy} onClick={() => act('snapshots')}>Restore saved version</button>}
+       <button type="button" className="ui button" disabled={busy || !scan} onClick={() => act('image-review')}>Review all image descriptions</button>
+       <button type="button" className="ui button" disabled={busy} onClick={close}>Close page actions</button>
+@@ -110,7 +110,7 @@ export default function RemediationPageActions({ base, section, item, request, r
+       </select></label>
+       {mode !== 'deterministic' && <p>This mode previews changes across the entire page. Review all changes before applying.</p>}
+       <div className="rq-candidates">{(scan.findings || []).map((f: any) => <label key={f.id}><input type="checkbox" disabled={busy || !f.fixable || mode !== 'deterministic'} checked={selected.includes(f.id)} onChange={e => { setSelected(prev => e.target.checked ? [...prev, f.id] : prev.filter(x => x !== f.id)); invalidate(); }} />{f.message}{!f.fixable && ' (manual review)'}</label>)}</div>
+-      <button type="button" className="ui primary button" disabled={busy || capabilities.preview !== true || (mode === 'deterministic' && !selected.length)} onClick={() => act('preview')}>Preview selected fix</button>
++      <button type="button" className="ui primary button" disabled={busy || (capabilities.preview !== true && !readRetry) || (mode === 'deterministic' && !selected.length)} onClick={() => act('preview')}>Preview selected fix</button>
+     </>}
+     {!!snapshots.length && <div className="ui segment"><label>Saved version<select disabled={busy} value={snapshot} onChange={e => { setSnapshot(e.target.value); invalidate(); }}><option value="">Choose a saved version</option>{snapshots.map(s => <option key={s.timestamp} value={s.timestamp}>{s.timestamp} — {s.summary} — {s.hash}</option>)}</select></label><button className="ui button" disabled={busy || !snapshot} onClick={() => act('restore-preview')}>Preview restore</button></div>}
+     {preview && <div className="ui segment">
+diff --git a/client/src/components/projects/RemediationWorkQueue.tsx b/client/src/components/projects/RemediationWorkQueue.tsx
+index d5580b64..e2222198 100644
+--- a/client/src/components/projects/RemediationWorkQueue.tsx
++++ b/client/src/components/projects/RemediationWorkQueue.tsx
+@@ -46,17 +46,7 @@ function ItemHistory({base,item,kind,users}:any){
+   </details>;
+ }
+ 
+-export default function RemediationWorkQueue({ projectID, onScanSaved, recoveryOnly = false, capabilities }: { projectID: string; onScanSaved?: () => void; recoveryOnly?: boolean; capabilities?: any }) {
+-  const [loadedCapabilities, setLoadedCapabilities] = useState<any>({});
+-  const effectiveCapabilities = capabilities || loadedCapabilities;
+-  useEffect(() => {
+-    if (capabilities) return;
+-    let current = true; setLoadedCapabilities({});
+-    request(`/project/accessibility/remedy/health?projectID=${encodeURIComponent(projectID)}`).then(result => {
+-      if (current) setLoadedCapabilities(result.available ? result.capabilities : {});
+-    }).catch(() => {});
+-    return () => { current = false; };
+-  }, [projectID, capabilities]);
++export default function RemediationWorkQueue({ projectID, onScanSaved, recoveryOnly = false, capabilities = {}, readRetry = false }: { projectID: string; onScanSaved?: () => void; recoveryOnly?: boolean; capabilities?: any; readRetry?: boolean }) {
+   const [data, setData] = useState<any>({ items: [], users: [], sections: [], candidates: [] });
+   const [sectionID, setSectionID] = useState('');
+   const [chosen, setChosen] = useState<string[]>([]);
+@@ -107,7 +97,7 @@ export default function RemediationWorkQueue({ projectID, onScanSaved, recoveryO
+     {data.nextCursor&&<button type="button" className="ui button" disabled={busy} onClick={()=>load(data.nextCursor).catch(e=>setError(e.message))}>Next 100 work items</button>}
+     {data.canEdit && <><label>Page tools<select value={activePage?.section.id || ''} onChange={e => { const section = data.sections.find((s: any) => s.id === e.target.value); setActivePage(section ? { section } : null); }}><option value="">Choose a page to review</option>{data.sections.map((s: any) => <option key={s.id} value={s.id}>{s.title}</option>)}</select></label></>}
+     {data.nextSectionCursor&&<button type="button" className="ui button" disabled={busy} onClick={()=>load(undefined,data.nextSectionCursor).catch(e=>setError(e.message))}>Next 100 pages</button>}
+-    {activePage && data.canEdit && <RemediationPageActions key={`${activePage.section.id}-${activePage.item?._id || ''}`} {...activePage} capabilities={effectiveCapabilities} base={base} request={request} refreshed={load} onScanSaved={onScanSaved} close={() => setActivePage(null)} />}
++    {activePage && data.canEdit && <RemediationPageActions key={`${activePage.section.id}-${activePage.item?._id || ''}`} {...activePage} capabilities={capabilities} readRetry={readRetry} base={base} request={request} refreshed={load} onScanSaved={onScanSaved} close={() => setActivePage(null)} />}
+     {data.canEdit && <details><summary>Add work from a page review</summary>
+       <label>Page<select value={sectionID} disabled={busy} onChange={e => setSectionID(e.target.value)}><option value="">Choose a page</option>{data.sections.map((s: any) => <option key={s.id} value={s.id}>{s.title}</option>)}</select></label>
+       {sectionID && <><p>Choose findings or manual checks. Existing items are retained; adding again does not duplicate them.</p>
+@@ -117,7 +107,7 @@ export default function RemediationWorkQueue({ projectID, onScanSaved, recoveryO
+     </details>}
+     <div className="rq-fields"><label>Show<select value={filter} onChange={e => setFilter(e.target.value)}><option value="open">All open items</option><option value="all">All items</option>{Object.entries(statuses).map(([v, title]) => <option key={v} value={v}>{title}</option>)}</select></label><div><button type="button" className="ui button" disabled={busy} onClick={() => act(() => Promise.resolve(), () => 'Queue refreshed.')}>Refresh queue</button></div></div>
+     {!items.length ? <p>No work items in this view.</p> : <div className="rq-table"><table className="ui celled table"><thead><tr><th>Page and finding</th><th>Assignment</th><th>Progress and review</th></tr></thead><tbody>{items.map((item: any) => <tr key={item._id}>
+-      <td><strong>{item.sectionTitle}</strong>{data.canEdit && <p><button type="button" className="ui button" onClick={() => setActivePage({ section: data.sections.find((section: any) => section.id === item.sectionID) || { id: item.sectionID, title: item.sectionTitle }, item })}>{effectiveCapabilities.mutate ? 'Fix and rescan task' : 'Review and rescan task'}</button></p>}<p>{item.criterionID} · {item.title}</p>{/^https:\/\//.test(item.sectionURL) && <a href={item.sectionURL} target="_blank" rel="noopener noreferrer">Open source page</a>}<details><summary>Original scan evidence</summary><p>{item.ruleId} {item.selector}</p><pre className="rq-evidence">{item.evidence}</pre><p>Captured: {item.scannedAt ? new Date(item.scannedAt).toLocaleString() : 'Not recorded'}. Evidence may change after a rescan; verification is explicit.</p></details></td>
++      <td><strong>{item.sectionTitle}</strong>{data.canEdit && <p><button type="button" className="ui button" onClick={() => setActivePage({ section: data.sections.find((section: any) => section.id === item.sectionID) || { id: item.sectionID, title: item.sectionTitle }, item })}>{capabilities.mutate ? 'Fix and rescan task' : 'Review and rescan task'}</button></p>}<p>{item.criterionID} · {item.title}</p>{/^https:\/\//.test(item.sectionURL) && <a href={item.sectionURL} target="_blank" rel="noopener noreferrer">Open source page</a>}<details><summary>Original scan evidence</summary><p>{item.ruleId} {item.selector}</p><pre className="rq-evidence">{item.evidence}</pre><p>Captured: {item.scannedAt ? new Date(item.scannedAt).toLocaleString() : 'Not recorded'}. Evidence may change after a rescan; verification is explicit.</p></details></td>
+       <td>{String(users.get(item.assignee) || (item.assignee ? 'Former team member' : 'Unassigned'))}<p>Priority: {item.priority}</p></td>
+       <td><strong>{label(item.status)}</strong><ItemHistory key={`${item._id}-${item.version}-scans`} base={base} item={item} kind="scanEvidence" users={users}/><ItemHistory key={`${item._id}-${item.version}-history`} base={base} item={item} kind="history" users={users}/>
+ 
+diff --git a/client/src/components/projects/ReviewOnly.test.tsx b/client/src/components/projects/ReviewOnly.test.tsx
+index 15dda8a3..67d7d96b 100644
+--- a/client/src/components/projects/ReviewOnly.test.tsx
++++ b/client/src/components/projects/ReviewOnly.test.tsx
+@@ -16,3 +16,13 @@ test('review-only page tools allow scan and preview while automatic apply and re
+  expect(screen.queryByLabelText(/I reviewed this preview/)).toBeNull();
+  expect(request.mock.calls.map(([path])=>path)).toEqual(['/queue/page/page/scan','/queue/page/page/preview']);
+ });
++
++test('degraded review tools retry only a deliberate read and never enable mutation',async()=>{
++ const request=vi.fn(async(_path:string)=>({findings:[],scanned_at:'synthetic'}));
++ render(<RemediationPageActions capabilities={{scan:false,preview:true,mutate:false,operation_status:false}} readRetry base="/queue" section={{id:'page',title:'Article'}} request={request} refreshed={async()=>{}} close={()=>{}}/>);
++ expect(request).not.toHaveBeenCalled();
++ fireEvent.click(screen.getByRole('button',{name:'Rescan page'}));
++ await waitFor(()=>expect(request).toHaveBeenCalledTimes(1));
++ expect(request.mock.calls[0][0]).toBe('/queue/page/page/scan');
++ expect(screen.queryByRole('button',{name:'Restore saved version'})).toBeNull();
++});
+diff --git a/client/src/remediation-queue-entry.tsx b/client/src/remediation-queue-entry.tsx
+index c3b430d0..d019ce44 100644
+--- a/client/src/remediation-queue-entry.tsx
++++ b/client/src/remediation-queue-entry.tsx
+@@ -2,8 +2,19 @@
+  * the same component directly from ProjectAccessibility. */
+ import React from 'react';
+ import { createRoot, Root } from 'react-dom/client';
++import {QueryClient, QueryClientProvider, useQuery} from '@tanstack/react-query';
++import api from './api';
+ import RemediationWorkQueue from './components/projects/RemediationWorkQueue';
+ 
++const queryClient = new QueryClient();
++function ScopedQueue({projectID}: {projectID: string}) {
++  const {data} = useQuery({queryKey:['remedy-capability', projectID],
++    queryFn:async()=>(await api.getProjectRemedyCapability(projectID)).data,
++    staleTime:30_000,retry:false});
++  return <RemediationWorkQueue projectID={projectID}
++    capabilities={data?.available || data?.readRetry ? data.capabilities : {}}
++    readRetry={data?.readRetry === true} />;
++}
+ let root: Root | undefined;
+ let host: HTMLDivElement | undefined;
+ let project = '';
+@@ -18,7 +29,7 @@ function sync() {
+   if (!id || !anchor || root || document.querySelector('.remediation-work-queue')) return;
+   host = document.createElement('div');
+   anchor.after(host); project = id;
+-  root = createRoot(host); root.render(<RemediationWorkQueue projectID={decodeURIComponent(id)} />);
++  root = createRoot(host); root.render(<QueryClientProvider client={queryClient}><ScopedQueue projectID={decodeURIComponent(id)} /></QueryClientProvider>);
+ }
+ new MutationObserver(() => {
+   if (!pending) { pending = true; requestAnimationFrame(sync); }
+diff --git a/docs/remediation-integration.md b/docs/remediation-integration.md
+index 44cd32fd..9575c139 100644
+--- a/docs/remediation-integration.md
++++ b/docs/remediation-integration.md
+@@ -242,7 +242,7 @@ matching process `ORG_ID` and stored project, explicit `REMEDY_API_BASE_URL` and
+ engine health response must explicitly carry this version/name and strict
+ capabilities; missing profile metadata retains legacy full-write requirements,
+ not implicit review-only selection. Unknown/malformed/inconsistent profiles
+-fail closed. Readiness is checked again before page actions.
++fail closed. Readiness is checked again before page actions. A valid review-only dependency-failure response permits an explicit authenticated scan/preview retry so real successful work can restore readiness; it never authorizes a write or claims the dependency is healthy.
+ 
+ Review-only requires scan+preview, permits mutate=false/operation_status=false,
+ and does not read Conductor signing keys. Missing optional LLM/browser providers
+diff --git a/server/api/projects.js b/server/api/projects.js
+index 3a18a2bf..9226d1c3 100644
+--- a/server/api/projects.js
++++ b/server/api/projects.js
+@@ -2909,7 +2909,7 @@ const checkProjectRemedyHealth = async (req, res) => {
+             const readiness = checkedRemedyReadiness(response.status, response.data);
+             return res.json({ err: false, ok: readiness.available, ...capability, ...readiness,
+                 state: readiness.available ? 'ready' : 'degraded',
+-                message: readiness.available ? '' : 'Remedy is unavailable. An operator must check the configured capabilities.' });
++                message: readiness.available ? '' : readiness.readRetry ? 'A review dependency failed. Retry a scan or preview after the connection recovers. Automatic edits remain unavailable.' : 'Remedy is unavailable. An operator must check the configured capabilities.' });
+         } catch (_error) {
+             return res.json({ err: false, ok: false, ...capability, available: false, state: 'unavailable',
+                 capabilities: { scan: false, preview: false, mutate: false, operation_status: false },
+diff --git a/server/api/remediationactions.ts b/server/api/remediationactions.ts
+index e89b9758..de52d16d 100644
+--- a/server/api/remediationactions.ts
++++ b/server/api/remediationactions.ts
+@@ -133,7 +133,7 @@ export function createRemediationActionHandler({ Project, WorkItems, OperationRe
+         throw reviewError('Automatic edits are unavailable. Edit through the normal book editor, then run a fresh scan.', 503);
+       }
+       const capability = isScan ? 'scan' : 'preview';
+-      if (!isWrite && !readiness.capabilities[capability]) throw reviewError('This review capability is unavailable. Recheck the connection or contact the deployment operator.', 503);
++      if (!isWrite && !readiness.capabilities[capability] && !readiness.readRetry) throw reviewError('This review capability is unavailable. Recheck the connection or contact the deployment operator.', 503);
+       evidenceVersion = section.remedyEvidenceVersion || 0;
+       const page = { page_url: section.sectionURL, section_title: section.sectionTitle };
+       let body: any = { ...page, finding_ids: req.body.findingIDs, fix_mode: req.body.fixMode,
+diff --git a/server/integration/remedy-routes.test.ts b/server/integration/remedy-routes.test.ts
+index d3bdc0e6..d19441e6 100644
+--- a/server/integration/remedy-routes.test.ts
++++ b/server/integration/remedy-routes.test.ts
+@@ -88,7 +88,7 @@ before(async () => {
+   bridge = http.createServer(async (req, res) => {
+     let raw = ''; for await (const part of req) raw += part;
+     const body = raw ? JSON.parse(raw) : {};
+-    if (req.url === '/v1/cxone/health') { assert.equal(req.headers['x-api-key'], 'synthetic_not_real'); res.setHeader('Content-Type','application/json'); return res.end(JSON.stringify(readinessOverride || { ok: true, state: "ready", capabilities: { scan: true, preview: true, mutate: true, operation_status: operationReady } })); }
++    if (req.url === '/v1/cxone/health') { if(readinessOverride?.ok===false)res.statusCode=503; assert.equal(req.headers['x-api-key'], 'synthetic_not_real'); res.setHeader('Content-Type','application/json'); return res.end(JSON.stringify(readinessOverride || { ok: true, state: "ready", capabilities: { scan: true, preview: true, mutate: true, operation_status: operationReady } })); }
+     calls.push({ path: req.url!, body });
+     if (rejectAction) { res.writeHead(503); return res.end(JSON.stringify({ detail: 'Rejected key synthetic_not_real at private-engine.example.invalid' })); }
+     if (req.url?.endsWith('/scan')) { if (scanFails) { res.writeHead(503); return res.end(JSON.stringify({ detail: 'Synthetic scanner offline' })); } const captured = scan(); if (holdScan) { const hold = holdScan; holdScan = undefined; await hold(); } res.setHeader('Content-Type','application/json'); return res.end(JSON.stringify(captured)); }
+@@ -1030,3 +1030,13 @@ test('review-only manual external changes require fresh evidence and never carry
+  assert.equal((await request(base+'/conformance')).data.report.verifiedCriteria,0);
+  assert.equal(calls.some(c=>c.path.endsWith('/apply-fix')||c.path.endsWith('/restore')),false);
+ });
++
++test('explicit authenticated source-read retry can restore a latched review dependency failure',async()=>{
++ readinessOverride={ok:false,state:'degraded',capabilities:{scan:false,preview:true,mutate:false,operation_status:false},profile:{contract:'cxone-review-v1',name:'review-only',required_capabilities:['scan','preview'],unavailable_reasons:['read_dependency_unavailable']}};
++ const before=calls.length;
++ const response=await request(matrix+'/scan','POST',input());
++ assert.equal(response.status,200);
++ assert.equal(calls.length,before+1);
++ assert.equal(calls.at(-1)!.path,'/v1/cxone/page/scan');
++ assert.equal((await request(matrix+'/apply','POST',input())).status,503);
++});
+diff --git a/server/util/remedyCapabilities.ts b/server/util/remedyCapabilities.ts
+index a98512a1..0608490c 100644
+--- a/server/util/remedyCapabilities.ts
++++ b/server/util/remedyCapabilities.ts
+@@ -23,6 +23,7 @@ export function checkedRemedyReadiness(status: number, data: any) {
+     try { signingConfiguration(); } catch { capabilities.mutate = false; }
+   }
+   return { available: data.ok && required.every(name => capabilities[name]), capabilities,
++    readRetry: reviewOnly && !data.ok && profile.unavailable_reasons.length === 1 && profile.unavailable_reasons[0] === 'read_dependency_unavailable',
+     ...(profile ? { profile: { contract: profile.contract, name: profile.name, required_capabilities: required,
+       unavailable_reasons: [...profile.unavailable_reasons] } } : {}) };
+ }
+-- 
+2.54.0 (Apple Git-157)
+

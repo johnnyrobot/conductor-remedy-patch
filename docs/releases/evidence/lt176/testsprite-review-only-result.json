@@ -1,0 +1,33 @@
+{
+  "runId": "42805ec7-f535-4938-8fa8-938292482d4c",
+  "testId": "cb75f5e0-aca6-47c3-a554-3981fcf000d8",
+  "testTitle": "Review-only Conductor scans and previews while automatic apply and restore stay unavailable",
+  "projectId": "4e433799-7c02-442f-8d07-1a99dce6620c",
+  "userId": "741884b8-5011-70e2-b35a-69f816f1fe89",
+  "status": "blocked",
+  "source": "cli",
+  "createdAt": "2026-10-29T19:47:33.940Z",
+  "startedAt": "2026-10-29T19:47:33.940Z",
+  "finishedAt": "2026-10-29T19:49:29.800Z",
+  "codeVersion": null,
+  "targetUrl": "http://localhost:41777",
+  "environment": {
+    "id": "b5631a88-a9c5-4534-acc5-9361a60b71a8",
+    "name": "default"
+  },
+  "createdFrom": null,
+  "failedStepIndex": 6,
+  "failureKind": null,
+  "error": "TEST BLOCKED\n\nThe accessibility test could not be run because the sign-in flow did not complete and the requested page was not reached.\n\nObservations:\n- The login screen remained busy after the supplied credentials were submitted and multiple waits.\n- The requested page redirected to a login endpoint that displayed \u201cSorry, we seem to have encountered an internal error.\u201d",
+  "videoUrl": "https://testsprite-videos.s3.us-east-1.amazonaws.com/20261029-194927-d14f8b49.webm",
+  "stepSummary": {
+    "total": 6,
+    "completed": 6,
+    "passedCount": 5,
+    "failedCount": 1
+  },
+  "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/c66ab795-72b2-5244-b0a2-0c60b1512705/projects/4e433799-7c02-442f-8d07-1a99dce6620c/test-cases/cb75f5e0-aca6-47c3-a554-3981fcf000d8",
+  "executionUrl": "https://www.testsprite.com/dashboard-v3/o/c66ab795-72b2-5244-b0a2-0c60b1512705/projects/4e433799-7c02-442f-8d07-1a99dce6620c/execution/55702f07-203e-4ffd-98aa-8eed1665155b/test/42805ec7-f535-4938-8fa8-938292482d4c",
+  "apiOutput": null,
+  "trace": null
+}
