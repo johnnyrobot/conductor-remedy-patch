@@ -4,9 +4,9 @@
   "role": "primary",
   "upstreamRepository": "https://github.com/LibreTexts/conductor.git",
   "baseCommit": "67301b35c3784ed73ba1a65011ef5a1d689abca1",
-  "expectedTree": "3f28edac429de440184f47dbd02c35a8a53768d1",
+  "expectedTree": "3346a7ce1b3b12b095d880da92c93f102b7a8158",
   "upstreamPackageVersion": "2.156.2",
-  "sourceCommit": "2c0177c76d1ff728d18c56f02051ffac004df010",
+  "sourceCommit": "6878c0d7b0160964e3dd9f59dcc5c7b46778667b",
   "patches": [
     {
       "path": "patches/0001-feat-a11y-carry-CXone-pageID-on-review-sections-extr.patch",
@@ -111,6 +111,10 @@
     {
       "path": "patches/0026-docs-a11y-document-optional-review-rollout-and-retai.patch",
       "sha256": "838c85922fa59a98e70d37ae8b527c1c97353af9e5ae113f5e03e9b5434b6df4"
+    },
+    {
+      "path": "patches/0027-fix-a11y-permit-explicit-read-recovery-without-enabl.patch",
+      "sha256": "fe74f51f10d31278dcbef51964d21485fab738cbc385149e072f9ff586183b12"
     }
   ],
   "upstreamScripts": {

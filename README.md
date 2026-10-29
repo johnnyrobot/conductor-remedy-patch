@@ -1,7 +1,7 @@
 # conductor-remedy-patch
 
 The **Conductor side** of the LibreTexts Remedy accessibility matrix, shipped as
-target-specific twenty-six-patch `git am` series against upstream Conductor, with
+target-specific twenty-seven-patch `git am` series against upstream Conductor, with
 the original sixteen-patch delivery retained for history.
 
 This repository contains no Conductor source of its own. It is a delivery
@@ -83,10 +83,10 @@ targets selected by the Chief, not observations of the running production versio
 
 | Target | Manifest | Resulting source tree |
 |---|---|---|
-| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `3f28edac429de440184f47dbd02c35a8a53768d1` |
-| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `08891ee1d3235b766291cbcb5c13977600b79599` |
+| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `3346a7ce1b3b12b095d880da92c93f102b7a8158` |
+| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `8de1199ab6ff584804afc7c48deed4ca7ac052d2` |
 
-Each manifest lists its own twenty-six ordered patches and SHA-256 checksums. Use
+Each manifest lists its own twenty-seven ordered patches and SHA-256 checksums. Use
 Node 22 and a fresh **detached** clone; the command refuses a wrong base, dirty
 checkout, active branch, changed patch or escaping path before application.
 
@@ -349,8 +349,8 @@ question flows. Full release validation still covers the coordinated stack.
 
 | Target | Server unit | Client unit | Authenticated route/Mongo | Builds |
 |---|---:|---:|---:|---|
-| Staging pinned `67301b35` | 62 pass | 295 pass | 73 pass | Client/server pass |
-| Released floor `352a657e` | 32 pass | 202 pass | 73 pass | Client/server pass |
+| Staging pinned `67301b35` | 62 pass | 296 pass | 74 pass | Client/server pass |
+| Released floor `352a657e` | 32 pass | 203 pass | 74 pass | Client/server pass |
 
 The current table records LT-176 component checks; LT-140 historical checks used Node 22.20.0 / npm 10.9.3 with the matching target's
 previously installed, unchanged lockfile dependencies. Both built servers reached

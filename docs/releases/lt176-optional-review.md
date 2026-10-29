@@ -34,13 +34,13 @@ and rendered-browser tools retain their actual request-specific failures.
 
 ## Component checks actually performed
 
-Both target series preserve the first 24 patch bytes and add patches 25–26.
-Fresh detached scratch checkouts reconstructed through the shipped manifest CLI:
+Both target series preserve the first 24 patch bytes and add patches 25–27.
+Fresh detached scratch checkouts reconstructed through the shipped manifest CLI (current receipts are staging-apply27.json and release-apply27.json; apply26 receipts retain the earlier review candidate):
 
 | Target | Final source tree | Server | Client | Actual router/JWT/Session/Mongo |
 |---|---|---:|---:|---:|
-| staging `67301b35` | `3f28edac429de440184f47dbd02c35a8a53768d1` | 62 | 295 | 73 |
-| v2.156.2 `352a657e` | `08891ee1d3235b766291cbcb5c13977600b79599` | 32 | 202 | 73 |
+| staging `67301b35` | `3346a7ce1b3b12b095d880da92c93f102b7a8158` | 62 | 296 | 74 |
+| v2.156.2 `352a657e` | `8de1199ab6ff584804afc7c48deed4ca7ac052d2` | 32 | 203 | 74 |
 
 Client/server builds pass with Node22.20.0. Local unchanged-lockfile dependencies
 were reused from each independently installed matching target; Linux CI performs
@@ -52,7 +52,7 @@ The actual readiness regression failed before the change, as did valid-preview
 crafted-write denial and the mounted review-only restore-control test, then
 passed. Full signed-write/recovery regressions remain. Malformed capability and
 unknown profile cases, manual source-change freshness and permission failures are
-covered through actual registered routes. Both actual matrix and page tools are
+covered through actual registered routes. Initial review identified a latched read-failure retry blocker; an authenticated deliberate scan/preview retry now reaches Bridge without declaring it healthy or allowing mutation. New dependency-retry regression ran red then green, and actual three-service recovery now retries through Conductor itself. The standalone demo entry uses the typed API and React Query rather than ad-hoc component fetching. Both actual matrix and page tools are
 mounted in UI regressions.
 
 [Actual three-service observations](evidence/lt176/actual-owned-http.json) prove
