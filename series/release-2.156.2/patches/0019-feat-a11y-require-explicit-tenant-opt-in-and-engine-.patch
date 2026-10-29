@@ -1,0 +1,763 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: johnnyrobot <174211481+johnnyrobot@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 04:45:09 -0700
+Subject: [PATCH] feat(a11y): require explicit tenant opt-in and engine
+ readiness
+
+LT-131: Default disabled, stored tenant binding, explicit engine credentials, safe capability/errors, lazy collection/index preflight, and mounted UI enforcement.
+---
+ .../ProjectAccessibility.capability.test.jsx  | 32 +++++++
+ .../projects/ProjectAccessibility.jsx         | 49 ++++++++--
+ docs/remediation-integration.md               | 55 ++++++++++-
+ server/api/conformance.ts                     |  7 +-
+ server/api/projects.js                        | 84 +++++++----------
+ server/api/remediationactions.ts              | 18 ++--
+ server/api/remediationqueue.ts                | 30 +++++-
+ server/integration/remedy-routes.test.ts      | 92 ++++++++++++++++++-
+ server/util/remediationactions.test.ts        |  4 +-
+ server/util/remediationqueue.test.ts          |  4 +-
+ server/util/remedyConfig.ts                   | 46 ++++++++++
+ 11 files changed, 340 insertions(+), 81 deletions(-)
+ create mode 100644 client/src/components/projects/ProjectAccessibility.capability.test.jsx
+ create mode 100644 server/util/remedyConfig.ts
+
+diff --git a/client/src/components/projects/ProjectAccessibility.capability.test.jsx b/client/src/components/projects/ProjectAccessibility.capability.test.jsx
+new file mode 100644
+index 00000000..2158a049
+--- /dev/null
++++ b/client/src/components/projects/ProjectAccessibility.capability.test.jsx
+@@ -0,0 +1,32 @@
++import React, { act } from 'react';
++import { createRoot } from 'react-dom/client';
++import { MemoryRouter } from 'react-router-dom';
++import { afterEach, expect, test, vi } from 'vitest';
++import axios from 'axios';
++import ProjectAccessibility from './ProjectAccessibility';
++
++vi.mock('axios', () => ({ default: { get: vi.fn(), post: vi.fn() } }));
++vi.mock('react-redux', () => ({ useSelector: () => ({ uuid: 'editor', roles: [] }) }));
++vi.mock('../error/ErrorHooks', () => ({ default: () => ({ handleGlobalError: vi.fn(), clearError: vi.fn() }) }));
++globalThis.IS_REACT_ACT_ENVIRONMENT = true;
++afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
++
++test('mounted project page follows server capability and leaves ordinary matrix controls usable', async () => {
++  const section = { _id: 'section-1', sectionTitle: 'Fixture', sectionURL: 'https://dev.libretexts.org/Sandboxes/johnnyphung/test', wcagReview: { criteria: [], summary: {} } };
++  const project = { projectID: 'fixture01', title: 'Fixture project', members: ['editor'], leads: [], liaisons: [], auditors: [], tags: [] };
++  axios.get.mockImplementation(async path => ({ data: path === '/project' ? { err: false, project }
++    : path.includes('remedy/health') ? { err: false, available: false, state: 'disabled', message: 'Remedy is not enabled for this project organization.' }
++    : { err: false, a11yReview: [section] } }));
++  const external = vi.fn(); vi.stubGlobal('fetch', external);
++  const container = document.createElement('div'); document.body.appendChild(container); const root = createRoot(container);
++  try {
++    await act(async () => root.render(<MemoryRouter><ProjectAccessibility match={{ params: { id: 'fixture01' } }} location={{ search: '' }} /></MemoryRouter>));
++    await act(async () => {});
++    expect(container.textContent).toContain('Remedy is not enabled for this project organization.');
++    expect([...container.querySelectorAll('button')].find(b => b.textContent.includes('Scan with Remedy'))).toBeDisabled();
++    expect(container.querySelector('#access-add-section-btn')).not.toBeDisabled();
++    expect(container.querySelector('.remediation-work-queue')).toBeNull();
++    expect(external).not.toHaveBeenCalled();
++    expect(axios.get).toHaveBeenCalledWith('/project/accessibility/remedy/health', { params: { projectID: 'fixture01' } });
++  } finally { await act(async () => root.unmount()); container.remove(); }
++});
+diff --git a/client/src/components/projects/ProjectAccessibility.jsx b/client/src/components/projects/ProjectAccessibility.jsx
+index 9058c561..0d9f3eb6 100644
+--- a/client/src/components/projects/ProjectAccessibility.jsx
++++ b/client/src/components/projects/ProjectAccessibility.jsx
+@@ -413,6 +413,7 @@ const WcagReviewTable = ({
+     fixScanSectionID,
+     openFixModal,
+     openAddModal,
++    remedyAvailable = false,
+ }) => (
+     <div className='wcag-review-list'>
+         <Table celled className='mt-1p wcag-review-table'>
+@@ -477,7 +478,7 @@ const WcagReviewTable = ({
+                                             icon='wrench'
+                                             content={`Fix ${fixableIssueCount}`}
+                                             loading={isLoadingFixFindings}
+-                                            disabled={Boolean(fixScanSectionID)}
++                                            disabled={!remedyAvailable || Boolean(fixScanSectionID)}
+                                             onClick={() => openFixModal(section)}
+                                         />
+                                     ) : (
+@@ -544,6 +545,9 @@ const ProjectAccessibility = (props) => {
+     const [syncTOCLoading, setSyncTOCLoading] = useState(false);
+ 
+     // Remedy scan + fix session state
++    const [remedyCapability, setRemedyCapability] = useState({ available: false, message: 'Checking Remedy availability.' });
++    const [capabilityCheck, setCapabilityCheck] = useState(0);
++    const remedyAvailable = remedyCapability.projectID === props.match.params.id && remedyCapability.available === true;
+     const [showScanModal, setShowScanModal] = useState(false);
+     const [scanLoading, setScanLoading] = useState(false);
+     const [scanProgress, setScanProgress] = useState({ total: 0, completed: 0, currentTitle: '' });
+@@ -650,6 +654,22 @@ const ProjectAccessibility = (props) => {
+     }, [project, user, setCanViewDetails, isLocalDemoProject]);
+ 
+ 
++    useEffect(() => {
++        let current = true;
++        setRemedyCapability({ available: false, message: 'Checking Remedy availability.' });
++        if (canViewDetails) {
++            axios.get('/project/accessibility/remedy/health', { params: { projectID: props.match.params.id } })
++                .then(({ data }) => {
++                    if (current) setRemedyCapability({ ...data, projectID: props.match.params.id,
++                        available: !data.err && data.available === true,
++                        message: data.message || data.errMsg || 'Remedy is unavailable for this project.' });
++                }).catch(() => {
++                    if (current) setRemedyCapability({ available: false, message: 'Remedy availability could not be checked. Contact your deployment operator.' });
++                });
++        }
++        return () => { current = false; };
++    }, [canViewDetails, props.match.params.id, capabilityCheck]);
++
+     /*
+      * Get Project's restricted details when the permission changes.
+      */
+@@ -965,6 +985,7 @@ const ProjectAccessibility = (props) => {
+     };
+ 
+     const openScanModal = () => {
++        if (!remedyAvailable) return;
+         setScanProgress({
+             total: reviewSections.filter(hasRemedyScanTarget).length,
+             completed: 0,
+@@ -1032,6 +1053,7 @@ const ProjectAccessibility = (props) => {
+     };
+ 
+     const scanWithRemedy = async () => {
++        if (!remedyAvailable) return;
+         const allSections = reviewSections.filter(hasRemedyScanTarget);
+         const failedSectionIDs = new Set(scanFailures
+             .map((failure) => failure.sectionID)
+@@ -1130,9 +1152,10 @@ const ProjectAccessibility = (props) => {
+     };
+ 
+     const ensureRemedyServerReady = async () => {
+-        const res = await axios.get('/project/accessibility/remedy/health');
+-        if (res.data.err) {
+-            throw (new Error(res.data.errMsg || 'Remedy Server is not ready.'));
++        const res = await axios.get('/project/accessibility/remedy/health', { params: { projectID: props.match.params.id } });
++        setRemedyCapability({ ...res.data, projectID: props.match.params.id });
++        if (res.data.err || !res.data.available) {
++            throw (new Error(res.data.message || res.data.errMsg || 'Remedy Server is not ready.'));
+         }
+     };
+ 
+@@ -1211,6 +1234,7 @@ const ProjectAccessibility = (props) => {
+     };
+ 
+     const openFixModal = async (section) => {
++        if (!remedyAvailable) return;
+         const {
+             section: refreshedSection,
+             findings: fixableFindings,
+@@ -1382,7 +1406,7 @@ const ProjectAccessibility = (props) => {
+     const selectedFixableFindings = activeFixFindings.filter((finding) => selectedFindingIDs.includes(finding.id));
+     const hasFailedScanSections = scanFailures.some((failure) => typeof (failure.sectionID) === 'string' && failure.sectionID.length > 0);
+     const isPipelineFixMode = remedyFixMode === 'pipeline';
+-    const canRunRemedyFixActions = activeFixSection && !fixActionsBlocked;
++    const canRunRemedyFixActions = remedyAvailable && activeFixSection && !fixActionsBlocked;
+     const canPreviewRemedyFix = canRunRemedyFixActions && (isPipelineFixMode || selectedFindingIDs.length > 0);
+     const canApplyRemedyFix = canRunRemedyFixActions
+         && previewData
+@@ -1507,7 +1531,7 @@ const ProjectAccessibility = (props) => {
+                                                 <div className='right-flex wcag-summary-actions'>
+                                                     <Button
+                                                         color='green'
+-                                                        disabled={reviewSections.length === 0 || scanLoading}
++                                                        disabled={!remedyAvailable || reviewSections.length === 0 || scanLoading}
+                                                         loading={scanLoading}
+                                                         onClick={openScanModal}
+                                                     >
+@@ -1542,14 +1566,21 @@ const ProjectAccessibility = (props) => {
+                                                     }
+                                                 </div>
+                                             </Segment>
+-                                            <ConformanceReview projectID={props.match.params.id} sections={reviewSections} onScanSaved={() => getReviewSections({ persistScore: true })} />
+-                                            <RemediationWorkQueue projectID={props.match.params.id} onScanSaved={() => getReviewSections({ persistScore: true })} />
++                                            {!remedyAvailable && <div role='status' className='ui message'>
++                                                <p>{remedyCapability.message}</p>
++                                                <Button onClick={() => setCapabilityCheck(value => value + 1)}>Check Remedy availability</Button>
++                                            </div>}
++                                            {remedyAvailable && <>
++                                                <ConformanceReview projectID={props.match.params.id} sections={reviewSections} onScanSaved={() => getReviewSections({ persistScore: true })} />
++                                                <RemediationWorkQueue projectID={props.match.params.id} onScanSaved={() => getReviewSections({ persistScore: true })} />
++                                            </>}
+                                             <WcagReviewTable
+                                                 sections={reviewSections}
+                                                 getSectionFixableIssueCount={getSectionFixableIssueCount}
+                                                 fixScanSectionID={fixScanSectionID}
+                                                 openFixModal={openFixModal}
+                                                 openAddModal={openAddModal}
++                                                remedyAvailable={remedyAvailable}
+                                             />
+                                             <div className='access-table-outer access-table-legacy-hidden'>
+                                                 <div className='access-table-inner'>
+@@ -1856,7 +1887,7 @@ const ProjectAccessibility = (props) => {
+                                                                                         icon='wrench'
+                                                                                         content={`Fix ${fixableIssueCount}`}
+                                                                                         loading={isLoadingFixFindings}
+-                                                                                        disabled={Boolean(fixScanSectionID)}
++                                                                                        disabled={!remedyAvailable || Boolean(fixScanSectionID)}
+                                                                                         onClick={() => openFixModal(item)}
+                                                                                     />
+                                                                                 )}
+diff --git a/docs/remediation-integration.md b/docs/remediation-integration.md
+index fee192ac..af3b30a3 100644
+--- a/docs/remediation-integration.md
++++ b/docs/remediation-integration.md
+@@ -18,7 +18,7 @@ Queue records persist in MongoDB with a unique project/finding key, optimistic v
+ 
+ ## Configuration and safeguards
+ 
+-Conductor uses `REMEDY_API_BASE_URL` and `REMEDY_API_KEY` (legacy aliases: `PROJECT_REMEDY_BASE_URL` and `PROJECT_REMEDY_API_KEY`). Deploy the gateway recovery routes and bridge endpoints together with the Conductor changes. Preserve each deployment's environment files, compose overrides, networks, and persistent snapshot volume.
++Conductor requires explicit server opt-in with `REMEDY_ENABLED=true`, `REMEDY_ORG_ID` equal to the deployment's `ORG_ID` and the stored project's `orgID`, plus `REMEDY_API_BASE_URL` and `REMEDY_API_KEY`. Legacy aliases and implicit localhost defaults are no longer accepted. See the tenant configuration policy below. Deploy the gateway recovery routes and bridge endpoints together with the Conductor changes. Preserve each deployment's environment files, compose overrides, networks, and persistent snapshot volume.
+ 
+ Bridge inference settings are documented in its `.env.example`. The shared client supports Ollama primary and OpenAI fallback for text, vision, and advanced agent tool calls. OpenAI tool calls use Responses, with tool-result and reasoning-context replay. Availability failures can trigger fallback; invalid requests and refusals do not.
+ 
+@@ -75,3 +75,56 @@ An 82-page sandbox book was remediated with retained pre-write snapshots: duplic
+ A separate controlled alt-text change on an already-remediated page was restored through Conductor. The original long description remained intact; restore rescanned to zero findings and refreshed the matrix. Queue verification remains a reviewer action.
+ 
+ The static scanner has a reproducible jsdom limitation on MathML: even `<math><mi>x</mi></math>` can make axe ARIA checks report a `getComputedStyle` error because the simulated MathML element lacks inline-style support. Related checks remain informational/manual review. Do not suppress these checks or interpret them as a pass; validate mathematical content and rendered-page behavior in a real browser. Keyboard behavior, contrast, and subject-matter adequacy still require reviewer checks.
++
++
++## Tenant configuration and readiness (LT-131)
++
++The server defaults Remedy OFF. For one intended deployment/organization, set
++`REMEDY_ENABLED=true` exactly and set `REMEDY_ORG_ID` to its existing `ORG_ID`.
++Every project is checked against its stored `orgID`; support access to another
++organization's project does not opt that organization in. A process serving more
++than its `ORG_ID` needs a separately approved mapping before enabling more tenants.
++A browser flag never enables these routes.
++
++An enabled deployment must explicitly supply `REMEDY_API_BASE_URL` (an HTTPS
++origin without credentials, path, query or fragment) and `REMEDY_API_KEY`.
++Explicit HTTP loopback origins are accepted for same-host local fixtures;
++there is no localhost fallback in any environment. Redirects are refused.
++Production credential provisioning and deployment remain owner-only steps.
++
++Authenticated `GET /project/accessibility/remedy/health?projectID=...` requires
++current project access. It returns only safe availability/capability fields and
++fixed messages, never the engine address, key or upstream error body. Configured
++preflight checks authenticated `/v1/cxone/health`, requiring `ok` and the scan,
++preview and mutate capabilities; liveness alone cannot enable the UI. Engine
++failure, missing config or optional storage failure leaves ordinary Conductor
++routes usable. Feature requests fail closed with a useful unavailable response.
++The mounted matrix disables scan/fix and does not mount queue/review controls
++until the server reports the project's effective capability. A recheck is
++available to recover from an outage.
++
++Feature models are compiled lazily after a configured, authorized request.
++They explicitly disable automatic collection/index creation. The first enabled
++health preflight or authorized work-queue request creates only `remediationworkitems` and
++`conformancerecords` and builds their declared indexes before exposing readiness:
++unique `{projectID:1,key:1}` for work-item deduplication and
++`{projectID:1,kind:1,createdAt:-1}` for conformance history lookup, plus Mongo `_id`.
++The database principal therefore needs collection/index creation privileges for
++these collections. Duplicates, missing privileges or index failures report
++unavailable; they do not crash unrelated startup or trigger automatic data
++repair. An operator must inspect existing duplicates before enablement; no
++retained rows or indexes are removed. Successful readiness is cached in-process;
++normal database failures continue to fail feature requests, and external index
++changes require an operator preflight/restart before use.
++
++History/evidence arrays and append-only conformance records grow without a new
++retention policy. Back up Projects, work items, conformance records and referenced
++identities consistently; preserve section IDs, fingerprints, evidence versions
++and pending claims. Restore must coordinate with the Bridge operation/snapshot
++ledger and trust epoch. Never clear pending claims or retry a write solely from a
++backup restore. Reconciliation is read-only until a separately authorized,
++audited administrative resolution exists.
++
++This policy is tested with Node22, isolated local Mongo and synthetic external
++providers. Actual Atlas tier, production Mongo/topology, orchestrator, provider
++access, immutable images, rollback and full-stack release gates remain open.
+diff --git a/server/api/conformance.ts b/server/api/conformance.ts
+index 3bc60160..0971ea5d 100644
+--- a/server/api/conformance.ts
++++ b/server/api/conformance.ts
+@@ -3,11 +3,12 @@ import mongoose from 'mongoose';
+ import { randomUUID } from 'node:crypto';
+ import { criteria, conformanceReport, validateReview } from '../util/conformance.js';
+ const recordSchema = new mongoose.Schema({projectID:String,sectionID:String,criterionID:String,kind:String,
+-  fingerprint:String,scopeVersion:String,status:String,actor:String,at:Date,data:mongoose.Schema.Types.Mixed}, {timestamps:true});
++  fingerprint:String,scopeVersion:String,status:String,actor:String,at:Date,data:mongoose.Schema.Types.Mixed}, {timestamps:true,autoCreate:false,autoIndex:false});
+ recordSchema.index({projectID:1,kind:1,createdAt:-1});
+-const Record = mongoose.models.ConformanceRecord || mongoose.model('ConformanceRecord',recordSchema);
+-export function registerConformance(router:any,{base,access,Records=Record}:any) {
++export const conformanceRecords = () => mongoose.models.ConformanceRecord || mongoose.model('ConformanceRecord',recordSchema);
++export function registerConformance(router:any,{base,access,Records}:any) {
+   const load=async(project:any)=>{
++    Records ||= conformanceRecords();
+     const records=await Records.find({projectID:project.projectID}).sort({createdAt:-1,_id:-1}).lean();
+     const scope=records.find((r:any)=>r.kind==='scope')?.data;
+     const reviews=records.filter((r:any)=>r.kind==='review').map((r:any)=>({...r.data,_id:r._id,sectionID:r.sectionID,actor:r.actor,at:r.at}));
+diff --git a/server/api/projects.js b/server/api/projects.js
+index 87e08607..8139635c 100644
+--- a/server/api/projects.js
++++ b/server/api/projects.js
+@@ -19,6 +19,8 @@ import { v4 } from 'uuid';
+ import User, { DEFAULT_PINNED_PROJECTS } from '../models/user.js';
+ import Project from '../models/project.js';
+ import { projectAssignees } from '../util/remediationqueue.js';
++import { remedyConfiguration, publicRemedyCapability } from '../util/remedyConfig.js';
++import { ensureRemedyStorage } from './remediationqueue.js';
+ import { createRemediationActionHandler } from './remediationactions.js';
+ import Book from '../models/book.js';
+ import Tag from '../models/tag.js';
+@@ -2799,59 +2801,41 @@ const updateA11YReviewSectionItems = async (req, res) => {
+ };
+ 
+ 
+-const getProjectRemedyBaseUrl = () => {
+-    const raw = process.env.REMEDY_API_BASE_URL || process.env.PROJECT_REMEDY_BASE_URL || 'http://127.0.0.1:8000';
+-    return raw.replace(/\/+$/, '');
+-};
+-
+-
+-const getProjectRemedyHeaders = () => {
+-    const headers = {
+-        'Content-Type': 'application/json',
+-    };
+-    const apiKey = process.env.REMEDY_API_KEY || process.env.PROJECT_REMEDY_API_KEY;
+-    if (typeof (apiKey) === 'string' && apiKey.length > 0) {
+-        headers['X-API-Key'] = apiKey;
+-    }
+-    return headers;
+-};
+-
+-
+-const getProjectRemedyErrorMessage = (err) => {
+-    if (err?.response?.data?.detail) {
+-        if (typeof (err.response.data.detail) === 'string') {
+-            return err.response.data.detail;
++/** Project-scoped effective capability, never a global campus enablement flag. */
++const checkProjectRemedyHealth = async (req, res) => {
++    res.setHeader('Cache-Control', 'no-store');
++    try {
++        const id = req.query.projectID;
++        if (typeof id !== 'string' || !/^[\w-]{1,100}$/.test(id)) {
++            return res.status(400).json({ err: true, errMsg: 'A project is required for Remedy availability.' });
+         }
+-        if (typeof (err.response.data.detail) === 'object' && typeof (err.response.data.detail.message) === 'string') {
+-            return err.response.data.detail.message;
++        const project = await Project.findOne({ projectID: id }).lean();
++        if (!project || !checkProjectMemberPermission(project, req.user)) {
++            return res.status(403).json({ err: true, errMsg: 'Project team access required.' });
+         }
+-    }
+-    if (typeof (err?.message) === 'string' && err.message.length > 0) {
+-        return err.message;
+-    }
+-    return conductorErrors.err6;
+-};
+-
+-
+-const checkProjectRemedyHealth = async (_req, res) => {
+-    try {
+-        const response = await axios.get(`${getProjectRemedyBaseUrl()}/healthz`, {
+-            headers: getProjectRemedyHeaders(),
+-            validateStatus: () => true,
+-        });
+-        if (response.status >= 200 && response.status < 300) {
+-            return res.send({ err: false, ok: true });
++        const config = remedyConfiguration(project);
++        const capability = publicRemedyCapability(config);
++        if (!config.available) return res.json({ err: false, ok: false, ...capability });
++        try {
++            await ensureRemedyStorage();
++            const response = await axios.get(`${config.base}/v1/cxone/health`, {
++                headers: { 'X-API-Key': config.key }, timeout: 10000,
++                maxRedirects: 0, validateStatus: () => true,
++            });
++            const remote = response.data?.capabilities;
++            const capabilities = Object.fromEntries(['scan', 'preview', 'mutate', 'operation_status'].map(name => [name, remote?.[name] === true]));
++            const available = response.status === 200 && response.data?.ok === true
++                && capabilities.scan && capabilities.preview && capabilities.mutate;
++            return res.json({ err: false, ok: available, ...capability, available,
++                state: available ? 'ready' : 'degraded', capabilities,
++                message: available ? '' : 'Remedy is unavailable. An operator must check the configured engine capabilities.' });
++        } catch (_error) {
++            return res.json({ err: false, ok: false, ...capability, available: false, state: 'unavailable',
++                capabilities: { scan: false, preview: false, mutate: false, operation_status: false },
++                message: 'Remedy is unavailable. An operator must check its configuration, storage and connection.' });
+         }
+-        return res.send({
+-            err: true,
+-            errMsg: `Remedy Server health check failed (${response.status}).`,
+-            status: response.status,
+-        });
+-    } catch (err) {
+-        return res.send({
+-            err: true,
+-            errMsg: getProjectRemedyErrorMessage(err),
+-        });
++    } catch (_error) {
++        return res.status(500).json({ err: true, errMsg: 'Unable to check Remedy availability.' });
+     }
+ };
+ 
+diff --git a/server/api/remediationactions.ts b/server/api/remediationactions.ts
+index 35b0e075..15e37463 100644
+--- a/server/api/remediationactions.ts
++++ b/server/api/remediationactions.ts
+@@ -1,3 +1,4 @@
++import { requireRemedyConfiguration } from '../util/remedyConfig.js';
+ /** Page actions are always resolved from the authorized project's stored section. */
+ export function registerRemediationActions(router: any, { base, access, Project, WorkItems, bridge = callBridge }: any) {
+   router.post(`${base}/page/:sectionID/:action`, ...access, createRemediationActionHandler({ Project, WorkItems, bridge }));
+@@ -6,6 +7,7 @@ export function registerRemediationActions(router: any, { base, access, Project,
+ /** Both the legacy matrix and work queue use this same stored-target action path. */
+ export function createRemediationActionHandler({ Project, WorkItems, bridge = callBridge }: any) {
+   return async (req: any, res: any) => {
++    const items = WorkItems || req.queueWorkItems;
+     let section: any;
+     let writeOutcome: string | undefined;
+     let evidenceVersion = 0;
+@@ -29,6 +31,7 @@ export function createRemediationActionHandler({ Project, WorkItems, bridge = ca
+       evidenceVersion++;
+     };
+     try {
++      requireRemedyConfiguration(req.queueProject);
+       section = (req.queueProject.a11yReview || []).find((s: any) => String(s._id) === req.params.sectionID);
+       if (!section) return res.status(404).json({ err: true, errMsg: 'Page is not in this project.' });
+       if (section.remedyWritePending) return res.status(409).json({ err: true, writeOutcome: isWrite ? 'not_started' : undefined, errMsg: 'A previous page write is pending or its outcome is unknown. Reconcile it before scanning or writing again.' });
+@@ -39,7 +42,7 @@ export function createRemediationActionHandler({ Project, WorkItems, bridge = ca
+       if (url.origin !== 'https://dev.libretexts.org' || url.username || url.password || path.split('/').some(p => p === '.' || p === '..') || !(path === '/Sandboxes/johnnyphung' || path.startsWith('/Sandboxes/johnnyphung/'))) {
+         return res.status(403).json({ err: true, errMsg: 'Remediation is limited to the Johnny sandbox.' });
+       }
+-      const item = req.body.itemID ? await WorkItems.findOne({ _id: req.body.itemID, projectID: req.params.projectID, sectionID: req.params.sectionID }).lean() : null;
++      const item = req.body.itemID ? await items.findOne({ _id: req.body.itemID, projectID: req.params.projectID, sectionID: req.params.sectionID }).lean() : null;
+       if (req.body.itemID && !item) return res.status(404).json({ err: true, errMsg: 'Work item is not on this project page.' });
+       evidenceVersion = section.remedyEvidenceVersion || 0;
+       const page = { page_url: section.sectionURL, section_title: section.sectionTitle };
+@@ -92,7 +95,7 @@ export function createRemediationActionHandler({ Project, WorkItems, bridge = ca
+           scannedAt: scanResult?.scanned_at, criterion, findings,
+           result: ['scan', 'rendered-scan'].includes(action) ? undefined : result, scanError };
+         try {
+-          await WorkItems.updateOne({ _id: item._id, projectID: req.params.projectID }, { $push: { scanEvidence: evidence }, $inc: { version: 1 } });
++          await items.updateOne({ _id: item._id, projectID: req.params.projectID }, { $push: { scanEvidence: evidence }, $inc: { version: 1 } });
+         } catch { evidenceError = 'Page action completed but task evidence could not be saved. Rescan from this task to retry.'; }
+       }
+       res.json({ err: false, ...result, page_url: section.sectionURL, scan: scanResult ? { ...scanResult, page_url: section.sectionURL } : null, scanError, evidenceError, writeOutcome });
+@@ -103,7 +106,7 @@ export function createRemediationActionHandler({ Project, WorkItems, bridge = ca
+         // Keep the durable claim on uncertainty or a failed post-write persistence step.
+         await invalidate('Page write requires reconciliation before further actions.', true).catch(() => {});
+       }
+-      res.status(e.status || (writeOutcome === 'uncertain' ? 502 : 500)).json({ err: true, writeOutcome, errMsg: writeOutcome === 'uncertain'
++      res.status(e.status || (writeOutcome === 'uncertain' ? 502 : 500)).json({ err: true, code: e.code, writeOutcome, errMsg: writeOutcome === 'uncertain'
+         ? 'Write outcome is unknown. Reconcile the pending write; do not retry automatically.'
+         : writeOutcome === 'written' ? 'Write completed, but evidence could not be saved. Do not repeat the write; reconcile its evidence state.'
+         : e.publicMessage || 'Page action failed. Refresh and try again.' }); }
+@@ -111,15 +114,14 @@ export function createRemediationActionHandler({ Project, WorkItems, bridge = ca
+ }
+ 
+ async function callBridge(action: string, body: unknown) {
+-  const base = (process.env.REMEDY_API_BASE_URL || process.env.PROJECT_REMEDY_BASE_URL || 'http://127.0.0.1:8000').replace(/\/+$/, '');
+-  const key = process.env.REMEDY_API_KEY || process.env.PROJECT_REMEDY_API_KEY;
+-  const response = await fetch(`${base}/v1/cxone/page/${action}`, { method: 'POST',
+-    headers: { 'Content-Type': 'application/json', ...(key ? { 'X-API-Key': key } : {}) },
++  const { base, key } = requireRemedyConfiguration();
++  const response = await fetch(`${base}/v1/cxone/page/${action}`, { method: 'POST', redirect: 'error',
++    headers: { 'Content-Type': 'application/json', 'X-API-Key': key },
+     body: JSON.stringify(body), signal: AbortSignal.timeout(600_000) });
+   const data: any = await response.json();
+   if (!response.ok) {
+     const err: any = new Error('Bridge rejected action'); err.status = response.status;
+-    err.publicMessage = data.detail?.message || (typeof data.detail === 'string' ? data.detail : 'Remedy could not complete this action.');
++    err.publicMessage = 'Remedy could not complete this action. Check feature availability or contact your deployment operator.';
+     throw err;
+   }
+   return data;
+diff --git a/server/api/remediationqueue.ts b/server/api/remediationqueue.ts
+index 4794f8e5..56617c2b 100644
+--- a/server/api/remediationqueue.ts
++++ b/server/api/remediationqueue.ts
+@@ -1,4 +1,5 @@
+-import { registerConformance } from './conformance.js';
++import { requireRemedyConfiguration } from '../util/remedyConfig.js';
++import { registerConformance, conformanceRecords } from './conformance.js';
+ import mongoose from 'mongoose';
+ import { registerRemediationActions } from './remediationactions.js';
+ import { queueCandidates, projectAssignees, validateQueueUpdate, queueStatuses, queuePriorities } from '../util/remediationqueue.js';
+@@ -14,12 +15,28 @@ const schema = new mongoose.Schema({
+   scanEvidence: [mongoose.Schema.Types.Mixed],
+   createdBy: String, verifiedBy: String, verifiedAt: Date,
+   history: [{ actor: String, at: Date, status: String, priority: String, assignee: String, note: String }],
+-}, { timestamps: true });
++}, { timestamps: true, autoCreate: false, autoIndex: false });
+ schema.index({ projectID: 1, key: 1 }, { unique: true });
+-const WorkItem = mongoose.models.RemediationWorkItem || mongoose.model('RemediationWorkItem', schema);
++const workItems = () => mongoose.models.RemediationWorkItem || mongoose.model('RemediationWorkItem', schema);
++let storageReady: Promise<void> | undefined;
++export async function ensureRemedyStorage() {
++  requireRemedyConfiguration();
++  if (!storageReady) {
++    storageReady = (async () => {
++      for (const model of [workItems(), conformanceRecords()]) {
++        await model.createCollection();
++        await model.createIndexes();
++      }
++    })().catch(() => {
++      storageReady = undefined;
++      throw Object.assign(Error('Remedy storage is unavailable. An operator must verify feature collections and indexes.'), { status: 503, code: 'remedy_storage_unavailable' });
++    });
++  }
++  return storageReady;
++}
+ 
+ /** Dependencies are injected so this module also layers onto the existing deployed bundle. */
+-export function registerRemediationQueue(router: any, { auth, projects, Project, User, WorkItems = WorkItem, bridge }: any) {
++export function registerRemediationQueue(router: any, { auth, projects, Project, User, WorkItems, bridge }: any) {
+   const base = '/project/:projectID/accessibility/workqueue';
+   const authorize = async (req: any, res: any, next: any) => {
+     try {
+@@ -28,9 +45,12 @@ export function registerRemediationQueue(router: any, { auth, projects, Project,
+       if (!project || !projects.checkProjectMemberPermission(project, req.user)) return res.status(403).json({ err: true, errMsg: 'Project team access required.' });
+       req.queueCanEdit = projectAssignees(project).includes(req.user.decoded.uuid) || auth.checkHasRole(req.user, 'libretexts', ['superadmin', 'support']);
+       if (req.method !== 'GET' && !req.queueCanEdit) return res.status(403).json({ err: true, errMsg: 'Project editing permission required.' });
++      requireRemedyConfiguration(project);
++      if (!WorkItems) { await ensureRemedyStorage(); WorkItems = workItems(); }
+       req.queueProject = project;
++      req.queueWorkItems = WorkItems;
+       next();
+-    } catch { res.status(500).json({ err: true, errMsg: 'Unable to load the work queue.' }); }
++    } catch (e: any) { res.status(e.status || 500).json({ err: true, code: e.code, errMsg: e.status === 503 ? e.message : 'Unable to load the work queue.' }); }
+   };
+   const access = [auth.verifyRequest, auth.getUserAttributes, authorize];
+   registerConformance(router, { base, access });
+diff --git a/server/integration/remedy-routes.test.ts b/server/integration/remedy-routes.test.ts
+index 00e78832..a8502fa1 100644
+--- a/server/integration/remedy-routes.test.ts
++++ b/server/integration/remedy-routes.test.ts
+@@ -24,9 +24,10 @@ const password = randomBytes(24).toString('base64url');
+ const users = Object.fromEntries(['editor','auditor','outsider'].map(name => [name, randomUUID()]));
+ const projectID = 'audit00001', sectionID = '115000000000000000000001';
+ const page = 'https://dev.libretexts.org/Sandboxes/johnnyphung/Conductor_test';
++let featureModelsAtImport: string[] = [];
+ let bridge: http.Server, appServer: http.Server, origin: string, cookies: Record<string,string> = {};
+ let calls: { path: string; body: any }[] = [];
+-let outcome = 'written', scanFails = false, changed = false;
++let outcome = 'written', scanFails = false, changed = false, rejectAction = false;
+ let observedVerified: number | undefined;
+ let holdScan: (() => Promise<void>) | undefined;
+ let holdWrite: (() => Promise<void>) | undefined;
+@@ -46,7 +47,10 @@ before(async () => {
+   await mongoose.connect(mongoURI);
+   // Fake only the external TOC HTTP provider; route, auth, merge and Mongo stay real.
+   axios.defaults.adapter = async config => {
+-    assert.match(config.url || '', /^https:\/\/api\.libretexts\.org\/endpoint\/getTOC\//);
++    if (!config.url?.startsWith('https://api.libretexts.org/endpoint/getTOC/')) {
++      assert.ok(config.url?.startsWith(process.env.REMEDY_API_BASE_URL + '/'));
++      return axios.getAdapter(originalAdapter)(config);
++    }
+     tocCalls++;
+     if (holdTOC) { const hold = holdTOC; holdTOC = undefined; await hold(); }
+     return { config, status: 200, statusText: 'OK', headers: {}, data: { toc: { structured: {
+@@ -58,12 +62,15 @@ before(async () => {
+     let raw = ''; for await (const part of req) raw += part;
+     const body = raw ? JSON.parse(raw) : {};
+     calls.push({ path: req.url!, body });
++    if (req.url === '/v1/cxone/health') { assert.equal(req.headers['x-api-key'], 'synthetic_not_real'); res.setHeader('Content-Type','application/json'); return res.end(JSON.stringify({ ok: true, capabilities: { scan: true, preview: true, mutate: true, operation_status: false } })); }
++    if (rejectAction) { res.writeHead(503); return res.end(JSON.stringify({ detail: 'Rejected key synthetic_not_real at private-engine.example.invalid' })); }
+     if (req.url?.endsWith('/scan')) { if (scanFails) { res.writeHead(503); return res.end(JSON.stringify({ detail: 'Synthetic scanner offline' })); } const captured = scan(); if (holdScan) { const hold = holdScan; holdScan = undefined; await hold(); } res.setHeader('Content-Type','application/json'); return res.end(JSON.stringify(captured)); }
+     if (req.url?.endsWith('/apply-fix')) { observedVerified = (await request(base + '/conformance')).data.report.verifiedCriteria; if (holdWrite) { const hold = holdWrite; holdWrite = undefined; await hold(); } changed = outcome !== 'noop'; if (outcome === 'uncertain') { res.destroy(); return; } res.setHeader('Content-Type','application/json'); return res.end(JSON.stringify({ applied: outcome !== 'noop' })); }
+     res.setHeader('Content-Type','application/json'); res.end(JSON.stringify({ before_html: '<p>before</p>', after_html: '<p>after</p>', preview_hash: 'synthetic-hash', preview_token: 'synthetic-token' }));
+   });
+   process.env.REMEDY_API_BASE_URL = await listen(bridge);
+   const { default: api } = await import('../api.js');
++  featureModelsAtImport = ['RemediationWorkItem', 'ConformanceRecord'].filter(name => mongoose.models[name]);
+   const app = express(); app.use(cookieParser()); app.use('/api/v1', api);
+   appServer = http.createServer(app); origin = await listen(appServer);
+   for (const [name, uuid] of Object.entries(users)) {
+@@ -73,10 +80,11 @@ before(async () => {
+   }
+ });
+ beforeEach(async () => {
++  process.env.REMEDY_ENABLED = 'true'; process.env.REMEDY_ORG_ID = 'libretexts'; process.env.REMEDY_API_KEY = 'synthetic_not_real';
+   await Project.deleteMany({ projectID });
+   await mongoose.connection.db!.collection('conformancerecords').deleteMany({ projectID });
+   await mongoose.connection.db!.collection('remediationworkitems').deleteMany({ projectID });
+-  changed = false; scanFails = false; outcome = 'written'; calls = []; tocCalls = 0;
++  changed = false; scanFails = false; rejectAction = false; outcome = 'written'; calls = []; tocCalls = 0;
+   await Project.create({ projectID, orgID: 'libretexts', title: 'Synthetic', projectURL: page, libreLibrary: 'dev', libreCoverID: '123', members: [users.editor], leads: [], liaisons: [], auditors: [users.auditor], tags: [], a11yReview: [{ _id: new mongoose.Types.ObjectId(sectionID), sectionTitle: 'Stored title', sectionURL: page, pageID: '123', wcagReview: scan().wcag_review }] });
+   assert.equal((await request(base + '/conformance/scope', 'POST', { boundaries: 'Full synthetic test page', processes: 'Read all synthetic page content', platformVersion: 'Synthetic local test release', confirmed: true })).status, 200);
+   const report = (await request(base + '/conformance')).data.report;
+@@ -261,6 +269,74 @@ test('TOC import refuses an existing uncertain claim before external work', asyn
+   assert.equal((await request(base + '/conformance')).data.report.verifiedCriteria, 0);
+ });
+ 
++test('Remedy defaults off with no model initialization and no external calls', async () => {
++  assert.deepEqual(featureModelsAtImport, []);
++  delete process.env.REMEDY_ENABLED;
++  for (const path of [`${matrix}/scan`, `${base}/page/${sectionID}/scan`]) {
++    const result = await request(path, 'POST', input());
++    assert.equal(result.status, 503);
++    assert.equal(result.data.code, 'remedy_disabled');
++  }
++  const capability = await request(`${matrix}/health?projectID=${projectID}`);
++  assert.equal(capability.status, 200);
++  assert.equal(capability.data.available, false);
++  assert.equal(capability.data.state, 'disabled');
++  assert.equal(calls.length, 0);
++});
++
++
++test('false opt-in and invalid enabled configuration reject both action paths without external work', async () => {
++  const original = { ...process.env };
++  const variants = [
++    { REMEDY_ENABLED: 'false' }, { REMEDY_ENABLED: 'TRUE' }, { REMEDY_ORG_ID: '' },
++    { REMEDY_ORG_ID: 'other-campus' }, { REMEDY_API_BASE_URL: '' }, { REMEDY_API_KEY: '' },
++    { REMEDY_API_BASE_URL: 'http://engine.example.invalid' },
++    { REMEDY_API_BASE_URL: 'https://engine.example.invalid/?api_key=hidden' },
++    { REMEDY_API_BASE_URL: 'https://username:password@engine.example.invalid' },
++    { REMEDY_API_BASE_URL: 'not a URL' },
++  ];
++  try {
++    for (const variant of variants) {
++      Object.assign(process.env, original, variant);
++      for (const path of [`${matrix}/preview`, `${base}/page/${sectionID}/scan`, `${base}/conformance/scope`]) {
++        const result = await request(path, 'POST', input());
++        assert.equal(result.status, 503, JSON.stringify(variant));
++        assert.ok(result.data.code.startsWith('remedy_'));
++        assert.doesNotMatch(JSON.stringify(result.data), /synthetic_not_real|engine\.example|username|password|hidden/);
++      }
++      const capability = await request(`${matrix}/health?projectID=${projectID}`);
++      assert.equal(capability.data.available, false);
++      assert.equal(calls.length, 0);
++    }
++  } finally { Object.assign(process.env, original); }
++});
++
++test('stored project organization prevents cross-tenant enablement and capability lookup requires project access', async () => {
++  await Project.updateOne({ projectID }, { $set: { orgID: 'other-campus' } });
++  for (const path of [`${matrix}/apply`, `${base}/page/${sectionID}/preview`]) {
++    const result = await request(path, 'POST', input());
++    assert.equal(result.status, 503);
++    assert.equal(result.data.code, 'remedy_tenant_disabled');
++  }
++  assert.equal((await request(`${matrix}/health?projectID=${projectID}`)).data.available, false);
++  assert.equal((await request(`${matrix}/health?projectID=${projectID}`, 'GET', undefined, 'outsider')).status, 403);
++  assert.equal((await request(`${matrix}/health?projectID=${projectID}`, 'GET', undefined, '')).status, 401);
++  assert.equal((await request(`${matrix}/health`)).status, 400);
++  assert.equal(calls.length, 0);
++});
++
++test('enabled project capability uses authenticated readiness and ordinary project reads survive disabled Remedy', async () => {
++  const ready = await request(`${matrix}/health?projectID=${projectID}`);
++  assert.equal(ready.status, 200); assert.equal(ready.data.available, true); assert.equal(ready.data.state, 'ready');
++  assert.deepEqual(ready.data.capabilities, { scan: true, preview: true, mutate: true, operation_status: false });
++  assert.doesNotMatch(JSON.stringify(ready.data), /synthetic_not_real|127\.0\.0\.1/);
++  assert.equal(calls.length, 1);
++  process.env.REMEDY_ENABLED = 'false';
++  const ordinary = await request(`/project/accessibility/sections?projectID=${projectID}`);
++  assert.equal(ordinary.status, 200); assert.equal(ordinary.data.err, false); assert.equal(ordinary.data.a11yReview.length, 1);
++  assert.equal(calls.length, 1);
++});
++
+ for (const merge of [true, false]) test(`unchanged legacy sections can be imported with merge=${merge}`, async () => {
+   // Simulate retained pre-Remedy BSON, without invoking new schema defaults.
+   await Project.collection.updateOne({ projectID }, { $unset: {
+@@ -278,3 +354,13 @@ test('TOC can merge unchanged sections after a real scan adds new BSON fields',
+   assert.equal(imported.status, 200);
+   assert.equal(imported.data.err, false);
+ });
++
++test('engine failure responses never expose upstream credential or address details', async () => {
++  rejectAction = true;
++  for (const path of [`${matrix}/preview`, `${base}/page/${sectionID}/preview`]) {
++    const result = await request(path, 'POST', input());
++    assert.equal(result.status, 503);
++    assert.equal(result.data.err, true);
++    assert.doesNotMatch(JSON.stringify(result.data), /synthetic_not_real|private-engine|Rejected key/);
++  }
++});
+diff --git a/server/util/remediationactions.test.ts b/server/util/remediationactions.test.ts
+index c4d38eb0..8a72ad84 100644
+--- a/server/util/remediationactions.test.ts
++++ b/server/util/remediationactions.test.ts
+@@ -4,10 +4,12 @@ import express from 'express';
+ import { registerRemediationQueue } from '../api/remediationqueue.js';
+ 
+ async function harness(run: (url: string, calls: any[], evidence: any[], row: any, updates: any[]) => Promise<void>, failScan = false, failInvalidation = false) {
++  process.env.REMEDY_ENABLED = 'true'; process.env.REMEDY_ORG_ID = 'libretexts'; process.env.ORG_ID = 'libretexts';
++  process.env.REMEDY_API_BASE_URL = 'http://127.0.0.1:8000'; process.env.REMEDY_API_KEY = 'synthetic_not_real';
+   const calls: any[] = [], evidence: any[] = [], updates: any[] = [];
+   const section = { _id: 'section1', sectionURL: 'https://dev.libretexts.org/Sandboxes/johnnyphung/Test', sectionTitle: 'Test' };
+   const row = { _id: '012345678901234567890123', projectID: 'demo', sectionID: 'section1', ruleId: 'img-alt', selector: 'img', criterionID: '1.1.1', status: 'in_progress' };
+-  const project = { projectID: 'demo', members: ['alice'], auditors: ['auditor'], a11yReview: [section] };
++  const project = { projectID: 'demo', orgID: 'libretexts', members: ['alice'], auditors: ['auditor'], a11yReview: [section] };
+   const app = express(); app.use(express.json());
+   registerRemediationQueue(app, {
+     auth: { verifyRequest: (req: any, res: any, next: any) => { if (!req.headers['x-user']) return res.sendStatus(401); req.user = { decoded: { uuid: req.headers['x-user'] } }; next(); }, getUserAttributes: (_r: any, _s: any, n: any) => n(), checkHasRole: () => false },
+diff --git a/server/util/remediationqueue.test.ts b/server/util/remediationqueue.test.ts
+index dc09b967..eb808aad 100644
+--- a/server/util/remediationqueue.test.ts
++++ b/server/util/remediationqueue.test.ts
+@@ -25,8 +25,10 @@ test('verification needs evidence and assignment must be to a project member', (
+ });
+ 
+ async function harness(run: (url: string, rows: any[]) => Promise<void>) {
++  process.env.REMEDY_ENABLED = 'true'; process.env.REMEDY_ORG_ID = 'libretexts'; process.env.ORG_ID = 'libretexts';
++  process.env.REMEDY_API_BASE_URL = 'http://127.0.0.1:8000'; process.env.REMEDY_API_KEY = 'synthetic_not_real';
+   const rows: any[] = [];
+-  const project = { projectID: 'demo', members: ['alice', 'bob'], auditors: ['auditor'], a11yReview: [section] };
++  const project = { projectID: 'demo', orgID: 'libretexts', members: ['alice', 'bob'], auditors: ['auditor'], a11yReview: [section] };
+   const WorkItems = {
+     find: ({ projectID }: any) => ({ sort: () => ({ lean: async () => rows.filter(r => r.projectID === projectID) }) }),
+     bulkWrite: async (ops: any[]) => {
+diff --git a/server/util/remedyConfig.ts b/server/util/remedyConfig.ts
+new file mode 100644
+index 00000000..12937bd6
+--- /dev/null
++++ b/server/util/remedyConfig.ts
+@@ -0,0 +1,46 @@
++/** One deployment opts in one explicitly named organization; projects remain authoritative. */
++export function remedyConfiguration(project?: { orgID?: string }) {
++  const unavailable = (state: string, code: string, message: string) => ({
++    enabled: false, available: false, state, code, message,
++    capabilities: { scan: false, preview: false, mutate: false, operation_status: false },
++  });
++  if (process.env.REMEDY_ENABLED !== 'true') {
++    return unavailable('disabled', 'remedy_disabled', 'Remedy is not enabled for this deployment.');
++  }
++  const tenant = process.env.REMEDY_ORG_ID;
++  if (!tenant || tenant !== process.env.ORG_ID) {
++    return unavailable('misconfigured', 'remedy_configuration', 'Remedy requires an explicit organization matching this deployment.');
++  }
++  if (project && project.orgID !== tenant) {
++    return unavailable('disabled', 'remedy_tenant_disabled', 'Remedy is not enabled for this project organization.');
++  }
++  try {
++    const raw = process.env.REMEDY_API_BASE_URL;
++    const key = process.env.REMEDY_API_KEY;
++    if (!raw || !key || !key.trim() || /[\r\n]/.test(key)) throw Error();
++    const url = new URL(raw);
++    const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
++    if ((url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback))
++      || url.username || url.password || url.search || url.hash
++      || (url.pathname !== '/' && url.pathname !== '')) throw Error();
++    return { enabled: true, available: true, state: 'configured', code: '', message: '',
++      capabilities: { scan: true, preview: true, mutate: true, operation_status: false },
++      base: url.origin, key };
++  } catch {
++    return unavailable('misconfigured', 'remedy_configuration', 'Remedy requires an explicit engine URL and API key. Use HTTPS off-host.');
++  }
++}
++
++/** Safe feature errors never include the configured URL, key, or upstream response. */
++export function requireRemedyConfiguration(project?: { orgID?: string }) {
++  const config = remedyConfiguration(project);
++  if (!config.available) {
++    throw Object.assign(Error(config.message), { status: 503, code: config.code, publicMessage: config.message });
++  }
++  return config as typeof config & { base: string; key: string };
++}
++
++export function publicRemedyCapability(config: ReturnType<typeof remedyConfiguration>) {
++  const { enabled, available, state, code, message, capabilities } = config;
++  return { enabled, available, state, code, message, capabilities };
++}
+-- 
+2.54.0 (Apple Git-157)
+

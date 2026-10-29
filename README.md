@@ -1,7 +1,7 @@
 # conductor-remedy-patch
 
 The **Conductor side** of the LibreTexts Remedy accessibility matrix, shipped as
-target-specific eighteen-patch `git am` series against upstream Conductor, with
+target-specific nineteen-patch `git am` series against upstream Conductor, with
 the original sixteen-patch delivery retained for history.
 
 This repository contains no Conductor source of its own. It is a delivery
@@ -20,10 +20,10 @@ targets selected by the Chief, not observations of the running production versio
 
 | Target | Manifest | Resulting source tree |
 |---|---|---|
-| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `295a2f2c27d41799c425957dcc50492a2ad420f9` |
-| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `1207a86ac1a3b87dc88eb8b112ea505a1b97fd2e` |
+| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `a87b1deeff6297d9e3fe54ae03426d77e12ab704` |
+| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `7f89aabab8acdc5417dc69d3cc8af2e13e63634c` |
 
-Each manifest lists its own eighteen ordered patches and SHA-256 checksums. Use
+Each manifest lists its own nineteen ordered patches and SHA-256 checksums. Use
 Node 22 and a fresh **detached** clone; the command refuses a wrong base, dirty
 checkout, active branch, changed patch or escaping path before application.
 
@@ -46,9 +46,11 @@ fixed. No automatic fetch, reset, abort, cleanup or push occurs.
 
 [Compatibility evidence, config policy and Mongo operations](docs/integration/pinned-targets.md)
 explain the preserved upstream scripts, target-specific test corrections and open
-release gates. **Production readiness is false** in both manifests. LT-131 still
-must implement server-enforced tenant opt-in/default disabled; a client flag is
-not enforcement. Never deploy an image selected by `latest`.
+release gates. **Production readiness is false** in both manifests. Patch0019 implements default-disabled, server-enforced tenant opt-in and explicit
+engine configuration. Signed operations/full-stack/deployment gates remain open. Never deploy an image selected by `latest`.
+
+[LT-131 config and validation evidence](docs/releases/lt131-tenant-opt-in.md) records
+the server-owned opt-in/config/readiness policy in patch0019.
 
 [LT-126 regression evidence](docs/releases/lt126-evidence-import.md) records the
 atomic TOC guard and failed standalone-scan observer correction in patch 0018.
@@ -185,12 +187,12 @@ and apply fails closed rather than overwriting someone's edit.
 
 Remedy must be explicitly enabled for the intended deployment/tenant, default
 disabled, with an explicit engine base and API key in production. LT-131 tracks
-the server enforcement and useful unavailable/preflight responses. The current
-series still has legacy enablement/fallback behavior, so it is **not approved for
-production**. `CLIENT__REMEDY_ENABLED` alone cannot enforce this policy.
+the server enforcement and useful unavailable/preflight responses. Patch0019 enforces that policy on both backend action paths and uses authenticated
+project capability to gate the UI; the broader stack is **not approved for production**. `CLIENT__REMEDY_ENABLED` alone cannot enforce this policy.
 
-Existing engine settings are `REMEDY_API_BASE_URL` and `REMEDY_API_KEY` (legacy
-`PROJECT_REMEDY_*` aliases exist). Do not infer that a missing key or a localhost
+Required settings are `REMEDY_ENABLED=true`, `REMEDY_ORG_ID` equal to this
+process's `ORG_ID` and stored `Project.orgID`, `REMEDY_API_BASE_URL` (explicit origin)
+and `REMEDY_API_KEY`. Legacy `PROJECT_REMEDY_*` aliases no longer enable Remedy. Do not infer that a missing key or a localhost
 fallback is acceptable in production. Do not expose a Bridge staff panel. See the
 [configuration and storage requirements](docs/integration/pinned-targets.md).
 The approved full-stack deployment bundle must supply immutable image digests,
@@ -221,16 +223,16 @@ question flows. Full release validation still covers the coordinated stack.
 
 | Target | Server unit | Client unit | Authenticated route/Mongo | Builds |
 |---|---:|---:|---:|---|
-| Staging pinned `67301b35` | 55 pass | 271 pass | 19 pass | Client/server pass |
-| Released floor `352a657e` | 25 pass | 178 pass | 19 pass | Client/server pass |
+| Staging pinned `67301b35` | 55 pass | 272 pass | 24 pass | Client/server pass |
+| Released floor `352a657e` | 25 pass | 179 pass | 24 pass | Client/server pass |
 
-LT-126 checks used Node 22.20.0 / npm 10.9.3 with the matching target's
+LT-131 checks used Node 22.20.0 / npm 10.9.3 with the matching target's
 previously installed, unchanged lockfile dependencies. Both built servers reached
 real `/health` 200 under production mode with synthetic configuration and isolated
 MongoDB **7.0.14**. These were macOS process boots. The earlier compatibility
 checks used MongoDB 8.0.5; their standalone server typecheck retained 60 baseline
-diagnostic lines on each target. Full standalone server typechecks were not
-rerun for LT-126; builds do not imply they pass. Linux/container, real providers,
+diagnostic lines on each target. LT-131 reran them: all60 diagnostics match the control after source-position
+and equivalent scratch/dependency-root normalization; full server typecheck still fails. Linux/container, real providers,
 production auth/topology and deployment remain unverified.
 
 ```bash

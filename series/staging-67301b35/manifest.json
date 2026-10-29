@@ -4,9 +4,9 @@
   "role": "primary",
   "upstreamRepository": "https://github.com/LibreTexts/conductor.git",
   "baseCommit": "67301b35c3784ed73ba1a65011ef5a1d689abca1",
-  "expectedTree": "295a2f2c27d41799c425957dcc50492a2ad420f9",
+  "expectedTree": "a87b1deeff6297d9e3fe54ae03426d77e12ab704",
   "upstreamPackageVersion": "2.156.2",
-  "sourceCommit": "af040bbbe93e934cd05d9fa70af3e7786f1efb99",
+  "sourceCommit": "ff1dca0b59a73385034698453f49ebd620d486ad",
   "patches": [
     {
       "path": "patches/0001-feat-a11y-carry-CXone-pageID-on-review-sections-extr.patch",
@@ -79,6 +79,10 @@
     {
       "path": "patches/0018-fix-a11y-reject-stale-TOC-imports-and-refresh-failed.patch",
       "sha256": "736af110463a1de58935a13d9d02448b23bc804a4b89db6b5107f7ad546872d1"
+    },
+    {
+      "path": "patches/0019-feat-a11y-require-explicit-tenant-opt-in-and-engine-.patch",
+      "sha256": "1281720c377b078cf2012fb5cb971f2b141ff4f34dedcdc48b10eb9ea8226ebb"
     }
   ],
   "upstreamScripts": {
@@ -119,6 +123,6 @@
   },
   "productionVersionObserved": false,
   "dockerImageBootVerified": false,
-  "tenantOptInEnforcementImplemented": false,
+  "tenantOptInEnforcementImplemented": true,
   "deploymentReady": false
 }
