@@ -20,8 +20,8 @@ targets selected by the Chief, not observations of the running production versio
 
 | Target | Manifest | Resulting source tree |
 |---|---|---|
-| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `a4c895125391bcde9649ab412e932174eb24991f` |
-| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `0cacd7bccd03571483f237de76eea932bef02101` |
+| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `295a2f2c27d41799c425957dcc50492a2ad420f9` |
+| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `1207a86ac1a3b87dc88eb8b112ea505a1b97fd2e` |
 
 Each manifest lists its own eighteen ordered patches and SHA-256 checksums. Use
 Node 22 and a fresh **detached** clone; the command refuses a wrong base, dirty
@@ -221,8 +221,8 @@ question flows. Full release validation still covers the coordinated stack.
 
 | Target | Server unit | Client unit | Authenticated route/Mongo | Builds |
 |---|---:|---:|---:|---|
-| Staging pinned `67301b35` | 55 pass | 271 pass | 16 pass | Client/server pass |
-| Released floor `352a657e` | 25 pass | 178 pass | 16 pass | Client/server pass |
+| Staging pinned `67301b35` | 55 pass | 271 pass | 19 pass | Client/server pass |
+| Released floor `352a657e` | 25 pass | 178 pass | 19 pass | Client/server pass |
 
 LT-126 checks used Node 22.20.0 / npm 10.9.3 with the matching target's
 previously installed, unchanged lockfile dependencies. Both built servers reached

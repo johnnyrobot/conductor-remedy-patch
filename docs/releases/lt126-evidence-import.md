@@ -6,6 +6,8 @@ this correction is not production deployment approval.
 
 A TOC import uses one external TOC response and one optimistic atomic update.
 The update matches the full original section array plus the stored book binding.
+Its expression uses a literal snapshot so Mongoose does not insert defaults or
+reorder legacy BSON during query casting.
 Any concurrent section/evidence/claim change produces HTTP409 and asks the user
 to refresh and review before another import. An initially pending/uncertain page
 refuses merge and replacement before fetching the TOC. There is no automatic
@@ -27,7 +29,7 @@ application-tool checks pass. Target patches 0001–0017 retain their prior byte
 |---|---:|---:|
 | Server unit | 55 pass | 25 pass |
 | Client unit (includes mounted real panels) | 271 pass | 178 pass |
-| Actual registered router, bcrypt login/JWT/Session, isolated Mongo | 16 pass | 16 pass |
+| Actual registered router, bcrypt login/JWT/Session, isolated Mongo | 19 pass | 19 pass |
 | Client/server build | pass/pass | pass/pass |
 | Built production-mode server `/health` | 200, Mongo connected | 200, Mongo connected |
 
@@ -43,7 +45,11 @@ the route tests assert the exact public section response is unchanged, including
 pending claim/evidence version, old review is stale, and overlapping scan/write
 requests remain409 with one external mutation and one TOC request. The unchanged
 merge control retains the original section ID/fingerprint and current review.
-The mounted form regression passes with checklist and confirmation cleared and
+Fresh-context Correctness review found that a document-array query equality
+recast legacy sections and could return409 without any concurrent write. Three
+actual-route controls (legacy merge/replacement and import after a real scan)
+reproduced that failure. The literal-expression correction makes all19 route
+tests pass on each target. The original race remains blocked. The mounted form regression passes with checklist and confirmation cleared and
 Save disabled.
 
 The first released-target health attempt preceded completion of its client build
