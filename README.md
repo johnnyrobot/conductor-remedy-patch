@@ -1,7 +1,7 @@
 # conductor-remedy-patch
 
 The **Conductor side** of the LibreTexts Remedy accessibility matrix, shipped as
-target-specific twenty-three-patch `git am` series against upstream Conductor, with
+target-specific twenty-four-patch `git am` series against upstream Conductor, with
 the original sixteen-patch delivery retained for history.
 
 This repository contains no Conductor source of its own. It is a delivery
@@ -20,10 +20,10 @@ targets selected by the Chief, not observations of the running production versio
 
 | Target | Manifest | Resulting source tree |
 |---|---|---|
-| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `6527b7d287d78cb505b4c04b301f29e6d65c14c7` |
-| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `52a78f7c74b1e79be5552c689abdc5fdbe1330c9` |
+| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `03589d94ffba9b3ee79a97dcb71100ed7e0f92c3` |
+| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `90ef990f17c53d45c3d25404b19f1a55ea1c20f8` |
 
-Each manifest lists its own twenty-three ordered patches and SHA-256 checksums. Use
+Each manifest lists its own twenty-four ordered patches and SHA-256 checksums. Use
 Node 22 and a fresh **detached** clone; the command refuses a wrong base, dirty
 checkout, active branch, changed patch or escaping path before application.
 
@@ -49,6 +49,11 @@ explain the preserved upstream scripts, target-specific test corrections and ope
 release gates. **Production readiness is false** in both manifests. Patch0019 implements default-disabled, server-enforced tenant opt-in and explicit
 engine configuration. Patch0020 supplies signed operations and read-only status lookup; production
 release still requires the remaining operational/deployment gates. Never deploy an image selected by `latest`.
+
+[LT-158 Linux candidate validation](docs/releases/lt158-linux-candidate.md) documents
+the automated matrix and candidate artifact contract. Patch0024 pins the actual
+upstream Node22 Docker stages to one immutable base. Linux execution is pending
+until that report records successful CI; deployment approval remains separate.
 
 [LT-127 explicit recovery evidence](docs/releases/lt127-explicit-recovery.md) records
 patch0023 and actual offline Bridge resolution followed by fresh local scan/CAS.

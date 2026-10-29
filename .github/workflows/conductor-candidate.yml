@@ -1,0 +1,59 @@
+name: Pinned Conductor Linux candidate
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: conductor-candidate-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  delivery:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.20.0
+      - name: Delivery integrity and diagnostic-policy tests
+        run: node --test tools/apply-series.test.mjs tools/compare-typecheck.test.mjs tools/ci/loopback-only.test.mjs
+  pinned:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [staging-67301b35, release-2.156.2]
+    services:
+      mongo:
+        image: mongo:7.0.14@sha256:0032d2ca20db5fa34926f196c8a43b74e34ed239a7f2453ff1505b6f12ba8ea6
+        ports:
+          - 27158:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ping:1}).ok'"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.20.0
+      - name: Reconstruct, test, baseline-relative typecheck, build and boot shipping image
+        env:
+          TARGET: ${{ matrix.target }}
+        run: >-
+          node tools/validate-target.mjs "series/$TARGET/manifest.json"
+          "$RUNNER_TEMP/conductor-$TARGET-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          "mongodb://127.0.0.1:27158/conductor_test_ci_${TARGET}"
+      - name: Preserve candidate image, exact manifests, reports and failure logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: conductor-candidate-${{ matrix.target }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/conductor-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}/output/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
