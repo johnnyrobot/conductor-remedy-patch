@@ -26,57 +26,51 @@ if (phase !== "recover") {
     auditor: config.auditor,
     outsider: config.outsider,
   }))
-    await db
-      .collection("users")
-      .insertOne({
-        uuid,
-        centralID: "synthetic-" + name,
-        email: name + "@candidate.example.invalid",
-        firstName: "Synthetic",
-        lastName: name,
-        authType: "traditional",
-        password: await bcrypt.hash(config.password, 4),
-        roles: [{ org: "libretexts", role: "user" }],
-        verifiedInstructor: true,
-        uxAcknowledgments: {},
-      });
-  await db
-    .collection("organizations")
-    .insertOne({
-      orgID: "libretexts",
-      active: true,
-      name: "Synthetic candidate",
-      subdomain: "candidate",
-      domain: "https://conductor.invalid",
-      commonsModules: { projects: { enabled: true, order: 1 } },
+    await db.collection("users").insertOne({
+      uuid,
+      centralID: "synthetic-" + name,
+      email: name + "@candidate.example.invalid",
+      firstName: "Synthetic",
+      lastName: name,
+      authType: "traditional",
+      password: await bcrypt.hash(config.password, 4),
+      roles: [{ org: "libretexts", role: "user" }],
+      verifiedInstructor: true,
+      uxAcknowledgments: {},
     });
-  await db
-    .collection("projects")
-    .insertOne({
-      projectID: config.projectID,
-      orgID: "libretexts",
-      title: "Synthetic compiled runtime",
-      status: "open",
-      classification: "construction",
-      projectURL: "",
-      libreLibrary: "",
-      libreCoverID: "",
-      contentArea: "Synthetic",
-      visibility: "private",
-      members: [config.editor],
-      leads: [],
-      liaisons: [],
-      auditors: [config.auditor],
-      tags: [],
-      a11yReview: [
-        {
-          _id: new ObjectId(config.sectionID),
-          sectionTitle: "Synthetic article",
-          sectionURL: config.pageURL,
-          pageID: "1",
-        },
-      ],
-    });
+  await db.collection("organizations").insertOne({
+    orgID: "libretexts",
+    active: true,
+    name: "Synthetic candidate",
+    subdomain: "candidate",
+    domain: "https://conductor.invalid",
+    commonsModules: { projects: { enabled: true, order: 1 } },
+  });
+  await db.collection("projects").insertOne({
+    projectID: config.projectID,
+    orgID: "libretexts",
+    title: "Synthetic compiled runtime",
+    status: "open",
+    classification: "construction",
+    projectURL: "",
+    libreLibrary: "",
+    libreCoverID: "",
+    contentArea: "Synthetic",
+    visibility: "private",
+    members: [config.editor],
+    leads: [],
+    liaisons: [],
+    auditors: [config.auditor],
+    tags: [],
+    a11yReview: [
+      {
+        _id: new ObjectId(config.sectionID),
+        sectionTitle: "Synthetic article",
+        sectionURL: config.pageURL,
+        pageID: "1",
+      },
+    ],
+  });
 } else
   await db
     .collection("users")
@@ -215,9 +209,40 @@ if (phase === "off") {
     409,
   );
   assert.equal((await control()).writes, 0);
+  const beforeWriteMetrics = await control();
   const written = await request(matrix + "/apply", "POST", reviewed);
   assert.equal(written.status, 200, JSON.stringify(written.data));
   assert.equal(written.data.outcome, "known_success");
+  assert.equal(
+    Boolean(written.data.scanError),
+    false,
+    "compiled post-write scan must succeed",
+  );
+  assert.ok(
+    written.data.scan?.wcag_review,
+    "compiled apply must return refreshed evidence",
+  );
+  const afterWriteMetrics = await control();
+  assert.equal(
+    afterWriteMetrics.scanCalls,
+    beforeWriteMetrics.scanCalls + 1,
+    "actual rescan must occur after dispatch",
+  );
+  assert.equal(
+    written.data.scan.wcag_review.sourceHash,
+    afterWriteMetrics.sourceHash,
+  );
+  const refreshed = await db
+    .collection("projects")
+    .findOne({ projectID: config.projectID });
+  assert.equal(
+    refreshed.a11yReview[0].wcagReview.sourceHash,
+    afterWriteMetrics.sourceHash,
+  );
+  assert.equal(
+    refreshed.a11yReview[0].wcagReview.rendered.renderedHash,
+    afterWriteMetrics.renderedHash,
+  );
   assert.equal((await control()).writes, 1);
   assert.equal(
     (await request(matrix + "/apply", "POST", reviewed)).status,

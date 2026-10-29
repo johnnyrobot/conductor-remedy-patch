@@ -16,7 +16,8 @@ const hash = (text) => createHash("sha256").update(text).digest("hex"),
 let html = "<p><strong>Chapter</strong></p>",
   mode = "success",
   writes = 0,
-  calls = 0;
+  calls = 0,
+  scanCalls = 0;
 const metadata = (outcome, operationID = randomUUID()) => ({
   operation_id: operationID,
   action: "cxone.apply",
@@ -61,7 +62,15 @@ const server = https.createServer(
             updated_at: new Date().toISOString(),
           });
         }
-        return res.end(JSON.stringify({ writes, calls }));
+        return res.end(
+          JSON.stringify({
+            writes,
+            calls,
+            scanCalls,
+            sourceHash: hash(html).slice(0, 16),
+            renderedHash: hash(html),
+          }),
+        );
       }
       if (req.url === "/v1/cxone/health")
         return res.end(
@@ -77,6 +86,7 @@ const server = https.createServer(
         );
       calls++;
       if (req.url === "/v1/cxone/page/scan") {
+        scanCalls++;
         const at = new Date().toISOString(),
           sourceHash = hash(html).slice(0, 16);
         return res.end(

@@ -183,6 +183,7 @@ try {
   }
   async function appPhase(mode) {
     writeConfig(mode);
+    owned.push(app);
     run("start-" + mode, [
       "run",
       "--detach",
@@ -236,6 +237,7 @@ try {
   if (!report.internalNetwork)
     throw Error("Runtime fixture must deny external egress.");
   run("pull-mongo", ["pull", "--platform", "linux/amd64", pins.mongo]);
+  owned.push(mongo);
   run("start-mongo", [
     "run",
     "--detach",
@@ -248,7 +250,6 @@ try {
     pins.mongo,
     "--bind_ip_all",
   ]);
-  owned.push(mongo);
   let mongoReady = false;
   for (let i = 0; i < 60; i++) {
     if (
@@ -288,6 +289,7 @@ try {
     }),
     { mode: 0o600 },
   );
+  owned.push(engine);
   run("start-engine", [
     "run",
     "--detach",
@@ -304,7 +306,6 @@ try {
     image,
     "/fixture/engine.mjs",
   ]);
-  owned.push(engine);
   await appPhase("enabled");
   await appPhase("recover");
   report.passed = true;
