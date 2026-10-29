@@ -8,8 +8,8 @@ Atlas tier, cluster topology and orchestrator are unknown.
 
 | Role | Upstream commit | Version context | Delivered tree |
 |---|---|---|---|
-| Primary staging | `67301b35c3784ed73ba1a65011ef5a1d689abca1` | Root package says 2.156.2; Chief assessment reported image label 2.157.0-rc.4 | `a87b1deeff6297d9e3fe54ae03426d77e12ab704` |
-| Secondary released floor | `352a657ec6de7b317a70ad3f8f744bc6d5054d9d` | v2.156.2 | `7f89aabab8acdc5417dc69d3cc8af2e13e63634c` |
+| Primary staging | `67301b35c3784ed73ba1a65011ef5a1d689abca1` | Root package says 2.156.2; Chief assessment reported image label 2.157.0-rc.4 | `31ed8448b9db4ab46d78a6980926af805fcd600f` |
+| Secondary released floor | `352a657ec6de7b317a70ad3f8f744bc6d5054d9d` | v2.156.2 | `2a10004048306b9f0fd28f093e0fcb9bef78bbc1` |
 
 The image label is assessment context, not a pulled/booted image or observation of
 production. Do not use `latest`; approved deployment must pin compatible image
@@ -17,7 +17,7 @@ versions and digests. This work preserves the upstream Dockerfile and supplies
 source/patch integrity manifests, not a finished image/deployment bundle.
 
 Use the explicit fresh detached-checkout command in the repository README. Each
-manifest binds the full base commit, nineteen ordered patch files, SHA-256s and
+manifest binds the full base commit, twenty ordered patch files, SHA-256s and
 final Git tree. The application tool checks those inputs and repository state
 before `git am --3way`, then checks the resulting tree. It makes no network call,
 reset, abort, branch deletion or push. On unexpected Git failure it preserves the
@@ -168,6 +168,7 @@ config controls; the compatibility table above remains historical evidence.
 |---|---|
 | `remediationworkitems` | Automatic `_id`; unique compound `{projectID:1,key:1}` for import deduplication |
 | `conformancerecords` | Automatic `_id`; lookup `{projectID:1,kind:1,createdAt:-1}` for append-only scope/review/sign-off records |
+| Private `projects.remedyOperations` | Atomic append-only intent/response history, excluded from ordinary project reads; grows within the Mongo document limit |
 | Existing `projects.a11yReview` | Stable section `_id`, source/rendered fingerprints, evidence revision and pending-write state |
 
 These models compile lazily and disable automatic collection/index creation.
@@ -195,9 +196,12 @@ and orchestrator are unknown and require the deployment owner's assessment.
 
 Patch 0018 addresses LT-126 stale TOC overwrite and failed standalone-scan parent
 refresh; [current regression evidence](../releases/lt126-evidence-import.md) records
-both target checks separately from the compatibility evidence above. LT-127 holds audited pending reconciliation and
-full no-op/failed-rescan evidence preservation; signed producer work waits for the
-exact approved LT-1 contract. LT-128 performance/read bounds, deadlines/cancellation, automated patch CI, full-stack Linux/auth/provider
+both target checks separately from the compatibility evidence above. Patch0020
+implements the approved signed producer, matched no-op preservation and scoped
+read-only recovery; LT-127 retains separately audited administrative resolution.
+[actual integration evidence](../releases/lt140-reviewed-operations.md) records
+precisely which service commits/runtime/scenarios passed. Audited administrative
+resolution remains separate. LT-128 performance/read bounds, deadlines/cancellation, automated patch CI, full-stack Linux/auth/provider
 failure/restore coverage, immutable image bundle and reviewed upgrade/rollback
 handoff remain open under LT-115/LT-111. Compatibility validation retires the old
 recommended source base; it does not clear those production gates.

@@ -4,9 +4,9 @@
   "role": "primary",
   "upstreamRepository": "https://github.com/LibreTexts/conductor.git",
   "baseCommit": "67301b35c3784ed73ba1a65011ef5a1d689abca1",
-  "expectedTree": "a87b1deeff6297d9e3fe54ae03426d77e12ab704",
+  "expectedTree": "31ed8448b9db4ab46d78a6980926af805fcd600f",
   "upstreamPackageVersion": "2.156.2",
-  "sourceCommit": "ff1dca0b59a73385034698453f49ebd620d486ad",
+  "sourceCommit": "b4b5903f103a8b5559c87f62a6b58e070d290263",
   "patches": [
     {
       "path": "patches/0001-feat-a11y-carry-CXone-pageID-on-review-sections-extr.patch",
@@ -83,6 +83,10 @@
     {
       "path": "patches/0019-feat-a11y-require-explicit-tenant-opt-in-and-engine-.patch",
       "sha256": "1281720c377b078cf2012fb5cb971f2b141ff4f34dedcdc48b10eb9ea8226ebb"
+    },
+    {
+      "path": "patches/0020-feat-a11y-bind-signed-operations-to-stored-reviewed-.patch",
+      "sha256": "fb40dde4d0981f6226bf95890c9ef413c9faed284624c21af47528ea829e257e"
     }
   ],
   "upstreamScripts": {
@@ -124,5 +128,7 @@
   "productionVersionObserved": false,
   "dockerImageBootVerified": false,
   "tenantOptInEnforcementImplemented": true,
-  "deploymentReady": false
+  "deploymentReady": false,
+  "signedReviewerOperationsImplemented": true,
+  "readOnlyOperationLookupImplemented": true
 }
