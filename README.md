@@ -1,7 +1,7 @@
 # conductor-remedy-patch
 
 The **Conductor side** of the LibreTexts Remedy accessibility matrix, shipped as
-target-specific twenty-two-patch `git am` series against upstream Conductor, with
+target-specific twenty-three-patch `git am` series against upstream Conductor, with
 the original sixteen-patch delivery retained for history.
 
 This repository contains no Conductor source of its own. It is a delivery
@@ -20,10 +20,10 @@ targets selected by the Chief, not observations of the running production versio
 
 | Target | Manifest | Resulting source tree |
 |---|---|---|
-| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `06fa225f313adec4bc9b6e6c4c207f596c8f719a` |
-| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `59e1b325c710b5be84c33dfb0a6e25cce1ae02ca` |
+| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `6527b7d287d78cb505b4c04b301f29e6d65c14c7` |
+| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `52a78f7c74b1e79be5552c689abdc5fdbe1330c9` |
 
-Each manifest lists its own twenty-two ordered patches and SHA-256 checksums. Use
+Each manifest lists its own twenty-three ordered patches and SHA-256 checksums. Use
 Node 22 and a fresh **detached** clone; the command refuses a wrong base, dirty
 checkout, active branch, changed patch or escaping path before application.
 
@@ -49,6 +49,11 @@ explain the preserved upstream scripts, target-specific test corrections and ope
 release gates. **Production readiness is false** in both manifests. Patch0019 implements default-disabled, server-enforced tenant opt-in and explicit
 engine configuration. Patch0020 supplies signed operations and read-only status lookup; production
 release still requires the remaining operational/deployment gates. Never deploy an image selected by `latest`.
+
+[LT-127 explicit recovery evidence](docs/releases/lt127-explicit-recovery.md) records
+patch0023 and actual offline Bridge resolution followed by fresh local scan/CAS.
+Only support/superadmin plus project policy may invoke it; status lookup never
+unlocks. Known remote success after a lost local reply remains a contract gate.
 
 [LT-156 indexed projection evidence](docs/releases/lt156-indexed-projection.md) records
 patch0021, unchanged ordered selection and same-host sizing. Patch0022 adds bounded detail/history reads and immutable write-ahead operation
@@ -226,7 +231,7 @@ Reviewed writes additionally require these signer settings (LT-148):
 | `REMEDY_REVIEWER_KEY_NOT_BEFORE` | Coordinated validity-window start, in epoch seconds. |
 | `REMEDY_REVIEWER_KEY_NOT_AFTER` | Coordinated validity-window end, in epoch seconds. |
 
-Missing, disabled or expired signing material leaves mutation unavailable while
+Missing, disabled or expired signing material leaves reviewed external writes unavailable while
 healthy authenticated read-only operation lookup remains usable; lookup never
 releases a pending claim. After applying the series, see the full
 `docs/remediation-integration.md` and `docs/remedy-storage-and-reads.md` guides.
@@ -261,10 +266,10 @@ question flows. Full release validation still covers the coordinated stack.
 
 | Target | Server unit | Client unit | Authenticated route/Mongo | Builds |
 |---|---:|---:|---:|---|
-| Staging pinned `67301b35` | 61 pass | 293 pass | 59 pass | Client/server pass |
-| Released floor `352a657e` | 31 pass | 200 pass | 59 pass | Client/server pass |
+| Staging pinned `67301b35` | 62 pass | 293 pass | 66 pass | Client/server pass |
+| Released floor `352a657e` | 32 pass | 200 pass | 66 pass | Client/server pass |
 
-The current table records LT-157 checks; LT-140 historical checks used Node 22.20.0 / npm 10.9.3 with the matching target's
+The current table records LT-127 checks; LT-140 historical checks used Node 22.20.0 / npm 10.9.3 with the matching target's
 previously installed, unchanged lockfile dependencies. Both built servers reached
 real `/health` 200 under production mode with synthetic configuration and isolated
 MongoDB **7.0.14**. These were macOS process boots. The earlier compatibility

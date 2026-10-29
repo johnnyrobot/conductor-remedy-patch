@@ -4,9 +4,9 @@
   "role": "primary",
   "upstreamRepository": "https://github.com/LibreTexts/conductor.git",
   "baseCommit": "67301b35c3784ed73ba1a65011ef5a1d689abca1",
-  "expectedTree": "06fa225f313adec4bc9b6e6c4c207f596c8f719a",
+  "expectedTree": "6527b7d287d78cb505b4c04b301f29e6d65c14c7",
   "upstreamPackageVersion": "2.156.2",
-  "sourceCommit": "b88a555a3c95ba8a342d0eb0e21ed2157252385a",
+  "sourceCommit": "f2f4cf3a812603fa1dcfbd7eff5813639c3c2c3f",
   "patches": [
     {
       "path": "patches/0001-feat-a11y-carry-CXone-pageID-on-review-sections-extr.patch",
@@ -95,6 +95,10 @@
     {
       "path": "patches/0022-feat-a11y-bound-reads-and-externalize-immutable-oper.patch",
       "sha256": "50d4f290efc479de1019ac749818385cdd79fab28921d800b0454c270a030218"
+    },
+    {
+      "path": "patches/0023-feat-a11y-resolve-only-audited-settled-page-claims-w.patch",
+      "sha256": "9744f166c3532d883f9f1bd92f57b67077d63c4d553554293dec168ace659437"
     }
   ],
   "upstreamScripts": {
@@ -155,6 +159,9 @@
     "exportDeadlineSeconds": 120,
     "workItemEventLimitPerArray": 1000,
     "workItemAppendThresholdBytes": 8388608,
-    "newEventMaximumBytes": 65536
-  }
+    "newEventMaximumBytes": 65536,
+    "resolutionCommitMarkers": "projects.remedyResolutionCommits private append-only, maximum1000; Project before-CAS maximum12MiB; new scan maximum1MiB"
+  },
+  "explicitAdministrativeResolutionImplemented": true,
+  "allPendingRecoveryContractsComplete": false
 }

@@ -1,0 +1,21 @@
+{
+  "synthetic": true,
+  "actualServices": true,
+  "actualOfflineBridgeResolution": true,
+  "readOnlyLookupKeptPending": true,
+  "signerDisabled": true,
+  "scanFailureKeptPending": true,
+  "versionRaceKeptPending": true,
+  "successfulFreshCanonicalScan": true,
+  "atomicLocalClaimRelease": true,
+  "durableCommitMarkers": 1,
+  "resolutionPreparations": 2,
+  "originalEventsUnchanged": 6,
+  "otherClaimsStillPending": 2,
+  "remoteOutcomeStillUnknown": true,
+  "writeRetries": 0,
+  "writesPerTarget": 1,
+  "humanVerifiedCriteria": 0,
+  "conformance": "verification_pending",
+  "knownSuccessContractGapStillHeld": true
+}
