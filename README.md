@@ -1,7 +1,7 @@
 # conductor-remedy-patch
 
 The **Conductor side** of the LibreTexts Remedy accessibility matrix, shipped as
-fifteen `git am`-able patches against upstream Conductor.
+sixteen `git am`-able patches against upstream Conductor.
 
 This repository contains no Conductor source of its own. It is a delivery
 vehicle: you clone the real Conductor, apply these commits, and you have the
@@ -43,7 +43,7 @@ likely to drift: `server/api.js` (route table), `server/package.json`
 
 ---
 
-## The fifteen commits
+## The sixteen commits
 
 Three layers. Each layer is usable without the ones after it.
 
@@ -86,13 +86,14 @@ Three layers. Each layer is usable without the ones after it.
 | 13 | `fix(a11y): require a reviewed preview before apply and report empty writes` | The matrix Fix modal now requires the same "I reviewed this preview" acknowledgement the work queue already had, and the work queue reports "No changes were written" when the bridge's `applied` flag is false instead of claiming success. |
 | 14 | `feat(a11y): name the Conductor reviewer in bridge write requests` | Page actions forward `requested_by` (the authenticated Conductor uuid) so the bridge audit log names the reviewer, not just the server account. Needs the matching bridge change (`requested_by` support); harmless without it. |
 
-**Release evidence lifecycle (0015)**
+**Release evidence lifecycle (0015–0016)**
 
 | # | Commit | What it does |
 |---|---|---|
 | 15 | `fix(a11y): bind page actions and reviews to current evidence` | Matrix and queue share stored-section targeting and session-derived attribution. Auditor/foreign mutations are denied; evidence is invalidated before possible writes, and delayed pre-write scans cannot restore it. Known no-op and uncertain outcomes stay distinct. Reviewer checklists reset when evidence or scope changes. |
+| 16 | `fix(a11y): keep pending writes and reviewer refresh fail closed` | Persist a write-pending claim to block overlapping actions and certification of interrupted/uncertain writes; refresh the mounted reviewer form even after a failed rescan. |
 
-Patch 0015 retains the existing Johnny sandbox restriction. Matrix scan/preview/apply
+Patches 0015–0016 retain the existing Johnny sandbox restriction. Matrix scan/preview/apply
 callers must now send `sectionID`; browser URLs and page IDs are ignored.
 See [first-wave validation and remaining release gates](docs/releases/lt115-first-wave.md).
 This is a release fix, not a declaration that the whole stack is ready to deploy.
@@ -100,7 +101,7 @@ This is a release fix, not a declaration that the whole stack is ready to deploy
 Applying only commits 1 and 2 gives you a working API with no UI, which is a
 reasonable way to test the server integration on its own. Stopping after 3
 gives you the matrix as originally shipped; after 7, the work queue; after 10,
-verification; after 14, the apply-path safeguards; after 15, the shared authorization and evidence lifecycle fix.
+verification; after 14, the apply-path safeguards; after 16, the shared authorization and evidence lifecycle safeguards.
 
 ### Original fourteen-patch footprint
 
@@ -230,7 +231,7 @@ accessibility matrix needs all three services.
 
 ```bash
 cd server && npm test      # tsx --test — 25 tests: a11yreviewutils, remediation queue/actions, conformance, handoff, CORS
-cd client && npm test      # vitest — 22 tests: accessibilityScore, RemediationPageActions, ConformanceReview
+cd client && npm test      # vitest — 23 tests: accessibilityScore, RemediationPageActions, ConformanceReview
 ```
 
 Both suites, `tsc --noEmit` and `vite build` in `client/` were run on the
