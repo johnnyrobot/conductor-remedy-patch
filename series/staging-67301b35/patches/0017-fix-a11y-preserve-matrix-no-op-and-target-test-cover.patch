@@ -1,0 +1,140 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Conductor Patch Dev <johnnyrobot@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 01:47:27 -0700
+Subject: [PATCH 17/17] fix(a11y): preserve matrix no-op and target test
+ coverage
+
+LT-130, LT-132: retain the omitted fork matrix no-op presentation regression
+and verify matrix apply attribution through the real authenticated router.
+Keep Playwright suites with their unchanged visual runner and align the
+reference test with the shared sanitizer's documented script-discard policy.
+No sanitizer runtime, dependency or upstream script changes are made.
+
+Author-Model: GPT-6
+---
+ .../projects/ProjectAccessibility.jsx         |  9 +++---
+ .../projects/ProjectAccessibility.test.jsx    | 32 +++++++++++++++++++
+ client/vite.config.ts                         |  3 ++
+ server/integration/remedy-routes.test.ts      | 14 ++++++++
+ server/util/referenceSanitize.test.ts         |  3 +-
+ 5 files changed, 56 insertions(+), 5 deletions(-)
+ create mode 100644 client/src/components/projects/ProjectAccessibility.test.jsx
+
+diff --git a/client/src/components/projects/ProjectAccessibility.jsx b/client/src/components/projects/ProjectAccessibility.jsx
+index 171b3bfdc83e175f59acf680b08bd80690d3bb7b..9058c56138231590796c930bd2c36e4b0d5b28e8 100644
+--- a/client/src/components/projects/ProjectAccessibility.jsx
++++ b/client/src/components/projects/ProjectAccessibility.jsx
+@@ -389,12 +389,13 @@ const PreviewDiffPanel = ({ previewData, selectedCount, panelRef }) => {
+     );
+ };
+ 
+-const ApplyResultPanel = ({ applyResult }) => {
++export const ApplyResultPanel = ({ applyResult }) => {
+     if (!applyResult) return null;
++    const wroteNothing = applyResult.applied === false;
+     return (
+-        <Segment color='green' className='mt-1p'>
+-            <Header as='h4'>{applyResult.applied === false ? 'No changes written' : 'Apply complete'}</Header>
+-            <p>{applyResult.applied === false ? 'The reviewed preview did not change the page.' : 'Remedy wrote the selected changes.'} {applyResult.scanError ? 'Fresh scan evidence is still required.' : 'The page scan was refreshed. Reviewer verification remains independent.'}</p>
++        <Segment color={wroteNothing ? 'yellow' : 'green'} className='mt-1p'>
++            <Header as='h4'>{wroteNothing ? 'No changes were written' : 'Apply complete'}</Header>
++            <p>{wroteNothing ? 'No changes were written: the preview contained no content change.' : 'Remedy wrote the selected changes.'} {applyResult.scanError ? 'Fresh scan evidence is still required.' : 'The page scan was refreshed. Reviewer verification remains independent.'}</p>
+             {applyResult.scanError && <p role='alert'>{applyResult.scanError}</p>}
+             {applyResult.revision_summary && <p><strong>Revision:</strong> {applyResult.revision_summary}</p>}
+             {applyResult.snapshot_path && <p><strong>Snapshot:</strong> {applyResult.snapshot_path}</p>}
+diff --git a/client/src/components/projects/ProjectAccessibility.test.jsx b/client/src/components/projects/ProjectAccessibility.test.jsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..f5c347b02f63ad11e8094cdcebf320fa80b866f0
+--- /dev/null
++++ b/client/src/components/projects/ProjectAccessibility.test.jsx
+@@ -0,0 +1,32 @@
++import React, { act } from 'react';
++import { createRoot } from 'react-dom/client';
++import { expect, test } from 'vitest';
++import { ApplyResultPanel } from './ProjectAccessibility';
++
++(globalThis).IS_REACT_ACT_ENVIRONMENT = true;
++
++test('matrix apply reports an empty write without claiming success', async () => {
++    const container = document.createElement('div');
++    document.body.appendChild(container);
++    const root = createRoot(container);
++
++    try {
++        await act(async () => root.render(
++            <ApplyResultPanel applyResult={{
++                applied: false,
++                attempted_rule_ids: ['duplicate-id'],
++                applied_rule_ids: [],
++            }} />,
++        ));
++
++        expect(container.textContent).toContain(
++            'No changes were written: the preview contained no content change.',
++        );
++        expect(container.textContent).not.toContain('Apply complete');
++        expect(container.textContent).not.toContain('Remedy wrote the selected changes');
++        expect(container.querySelector('.ui.green.segment')).toBeNull();
++    } finally {
++        await act(async () => root.unmount());
++        container.remove();
++    }
++});
+diff --git a/client/vite.config.ts b/client/vite.config.ts
+index a728ef606160d998f9e3ad4822e9531d0d0f33a6..7d788d427c90a8ffee79c6fa6f929183bf0eb903 100644
+--- a/client/vite.config.ts
++++ b/client/vite.config.ts
+@@ -1,4 +1,5 @@
+ import { defineConfig } from 'vite';
++import { configDefaults } from 'vitest/config';
+ import react from '@vitejs/plugin-react';
+ import viteTsconfigPaths from 'vite-tsconfig-paths';
+ import tailwindcss from '@tailwindcss/vite';
+@@ -12,6 +13,8 @@ export default defineConfig({
+     }
+   },
+   test: {
++    // Playwright owns these suites through the unchanged test:visual scripts.
++    exclude: [...configDefaults.exclude, 'visual-tests/**'],
+     environment: 'jsdom',
+     globals: true,
+     setupFiles: ['./src/setupTests.ts'],
+diff --git a/server/integration/remedy-routes.test.ts b/server/integration/remedy-routes.test.ts
+index c851fc4c7c43cc43ea3ff4aaf4175d48fc5b50fb..97cf42f4ad26ef02a832e750eff88664a00d0b66 100644
+--- a/server/integration/remedy-routes.test.ts
++++ b/server/integration/remedy-routes.test.ts
+@@ -177,3 +177,17 @@ test('a scan during an outstanding write cannot make the old review current', as
+     assert.equal(calls.filter(c => c.path.endsWith('/apply-fix')).length, 1);
+   } finally { release(); await writing; }
+ });
++
++
++test('matrix apply forwards only session-derived reviewer attribution and the stored target', async () => {
++  const response = await request(`${matrix}/apply`, 'POST', {
++    ...input(), requested_by: users.outsider,
++    sectionURL: 'https://foreign.invalid/Sandboxes/other', pageID: 'forged',
++  });
++  assert.equal(response.status, 200);
++  const sent = calls.find(c => c.path.endsWith('/apply-fix'))!.body;
++  assert.equal(sent.requested_by, users.editor);
++  assert.equal(sent.page_url, page);
++  assert.equal(sent.page_id, undefined);
++  assert.equal(sent.preview_token, 'synthetic-token');
++});
+diff --git a/server/util/referenceSanitize.test.ts b/server/util/referenceSanitize.test.ts
+index 65040de50a33c65e4cae8b9d9636d167096595cc..5a224bc02f36232821c210b168054066463c2797 100644
+--- a/server/util/referenceSanitize.test.ts
++++ b/server/util/referenceSanitize.test.ts
+@@ -10,7 +10,8 @@ import {
+ 
+ describe("sanitizeReferenceText", () => {
+   const injections: [string, string][] = [
+-    ["Intro<script>alert(1)</script> to Bio", "Introalert(1) to Bio"],
++    // The shared sanitizer uses sanitize-html default nonTextTags: script content is discarded.
++    ["Intro<script>alert(1)</script> to Bio", "Intro to Bio"],
+     ["<img src=x onerror=alert(1)>Title", "Title"],
+     ["<svg/onload=alert(1)>X", "X"],
+     ["Title <img src=x onerror=alert(1)", "Title"],
+-- 
+2.54.0 (Apple Git-157)
+

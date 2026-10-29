@@ -1,5 +1,8 @@
 # First Conductor release slice: target authorization and evidence lifecycle
 
+Historical PR #3 evidence at `1c1a5ec1`. Current target delivery and validation
+are in [the pinned-target guide](../integration/pinned-targets.md).
+
 LT-115 / LT-117 / LT-109; parent release LT-111 remains open.
 
 This slice fixes the matrix/queue policy divergence and stale reviewer draft. It
@@ -18,14 +21,17 @@ patches in order. Patches 0001–0014 are unchanged.
   stored sections and remain limited to `https://dev.libretexts.org/Sandboxes/johnnyphung`.
   This slice does not widen that write scope or provision real credentials.
 - Before dispatching apply/restore, Conductor persists evidence invalidation. A
-  persistence failure prevents dispatch. It invalidates again after the reply or
-  an uncertain failure. Rescan runs server-side after a known result; closing a
+  persistence failure prevents dispatch. After a known acknowledgement it invalidates again and
+  releases the claim for rescan. An uncertain success-shaped reply retains the
+  initial invalidation and pending claim; a transport failure retains/reasserts it. Rescan runs server-side after a known result; closing a
   browser cannot leave the old approval current. A scan started before the write
   cannot overwrite post-write evidence: persistence compares the section's
   `remedyEvidenceVersion`. A persisted `remedyWritePending` claim blocks concurrent
   scans/writes and makes verification unavailable if a worker exits mid-write.
   Existing documents without those fields start at zero/false;
-  no destructive data migration is needed.
+  no destructive data migration is needed. The competing TOC writer remains a
+  release blocker under LT-126, so these direct-action guards are not a complete
+  release-safety claim.
 - Responses distinguish `writeOutcome`: `not_started`, `not_written`, `written`,
   or `uncertain`. `applied:false` / `restored:false` is a known no-op. A missing
   acknowledgement or failed transport is uncertain, retains invalid evidence,

@@ -1,0 +1,110 @@
+{
+  "formatVersion": 1,
+  "target": "release-2.156.2",
+  "role": "secondary-released-floor",
+  "upstreamRepository": "https://github.com/LibreTexts/conductor.git",
+  "baseCommit": "352a657ec6de7b317a70ad3f8f744bc6d5054d9d",
+  "expectedTree": "61636f304ca81b983a481eb266ccf0550452e05f",
+  "upstreamPackageVersion": "2.156.2",
+  "sourceCommit": "76158bc4049c65af29592ece958f136b3a7b78a1",
+  "patches": [
+    {
+      "path": "patches/0001-feat-a11y-carry-CXone-pageID-on-review-sections-extr.patch",
+      "sha256": "e822fdb1557d0a00ed9c06d92d5b0dfb9317f5ae71c7e6e7edf3ffe4d9856e20"
+    },
+    {
+      "path": "patches/0002-feat-a11y-add-Remedy-scan-preview-apply-endpoints-an.patch",
+      "sha256": "abcb840f117f5cea0e3e199fd39c76fd61d5dbbbabcdb9bdb4c1a50777177f09"
+    },
+    {
+      "path": "patches/0003-feat-a11y-add-WCAG-matrix-scoring-and-Remedy-review-.patch",
+      "sha256": "ee19f2a8912220670d12018a161f8c41aa228cfdd6b0827496d59033c34c6cb7"
+    },
+    {
+      "path": "patches/0004-feat-connect-remediation-tasks-to-reviewed-fixes-and.patch",
+      "sha256": "c91149a919ac5a281cd669313ad3b7a8cdc81c8896edaebde6e6ac2474e92418"
+    },
+    {
+      "path": "patches/0005-docs-document-remediation-release-integration-and-va.patch",
+      "sha256": "c8ff4f83058560b22c176de72b6a0b0423318f79ad505cd48c7485472fd9b1af"
+    },
+    {
+      "path": "patches/0006-Refresh-remediation-matrix-and-support-reviewed-comp.patch",
+      "sha256": "c85f3f7e4c4128a96e3ee95d956e17aa8e5d4eb6aabd471e7f1660caa1428d44"
+    },
+    {
+      "path": "patches/0007-Document-book-remediation-acceptance-and-static-scan.patch",
+      "sha256": "741f9c9a41d33cada2735db86fdf7b0bae6880693c408e5045c46e53890262b4"
+    },
+    {
+      "path": "patches/0008-feat-require-reviewer-evidence-for-WCAG-conformance.patch",
+      "sha256": "bd4c23973a9efbb9a5fcc54ac6d02b21ba7f5ef2b799ea191d677f2ff4635147"
+    },
+    {
+      "path": "patches/0009-fix-invalidate-failed-scans-and-serve-authenticated-.patch",
+      "sha256": "7a3acbf98a109dd1284ba34b7bb266ee68a4bd7b7e03626c6331847d0c8f1a02"
+    },
+    {
+      "path": "patches/0010-feat-separate-remediation-handoff-acceptance-from-WC.patch",
+      "sha256": "b272f7550de0edb4b51db1432f45be83ecccd6eae45c28855e293cce1360bf5e"
+    },
+    {
+      "path": "patches/0011-fix-honor-configured-Conductor-browser-origins.patch",
+      "sha256": "b6b4d2ab4561f53a39d353b3ee225ffb9de426648a15aae3190d9a0f288bbdcd"
+    },
+    {
+      "path": "patches/0012-test-a11y-run-RemediationPageActions-under-vitest.patch",
+      "sha256": "6d91faa6efc1aa313e71deff713797a409437c1f2e9fc89cc4e394ddf7540b13"
+    },
+    {
+      "path": "patches/0013-fix-a11y-require-a-reviewed-preview-before-apply-and.patch",
+      "sha256": "999a8b04addb92ca49a5f4edae376579625cd51264d97e01cab9e106fc26eceb"
+    },
+    {
+      "path": "patches/0014-feat-a11y-name-the-Conductor-reviewer-in-bridge-writ.patch",
+      "sha256": "939ea37efbfee6e609dfbc7d3056ab7da4eab7675fa65d69f141140a7bf0353f"
+    },
+    {
+      "path": "patches/0015-fix-a11y-bind-page-actions-and-reviews-to-current-ev.patch",
+      "sha256": "0d078fef152ae0157f396be84cb02f59b1eebc590001a4524c568070b87e571d"
+    },
+    {
+      "path": "patches/0016-fix-a11y-keep-pending-writes-and-reviewer-refresh-fa.patch",
+      "sha256": "7415a9e2f32379c4a078c5dcc268c4f5ef3378201709d186703b25a2397baf20"
+    },
+    {
+      "path": "patches/0017-fix-a11y-preserve-matrix-no-op-and-target-test-cover.patch",
+      "sha256": "baae1a7a62d5c932caca9340f7680cb7ef71154f58bbe0e12b54921eaa5d0462"
+    }
+  ],
+  "upstreamScripts": {
+    "server": {
+      "dev": "tsx watch --clear-screen=false server.ts | pino-pretty",
+      "build": "tsup server.ts --format esm --dts --out-dir dist && tsc-alias",
+      "typecheck": "tsc --noEmit",
+      "start:prod": "node --experimental-specifier-resolution=node dist/server.js",
+      "export:support": "tsx scripts/exportSanitizedSupportTickets.ts"
+    },
+    "client": {
+      "start": "vite --port 3000",
+      "build": "tsc && vite build",
+      "serve": "vite preview",
+      "test": "vitest run",
+      "test:watch": "vitest"
+    }
+  },
+  "baselineLockfiles": {
+    "server/package-lock.json": "e1751a17d2d732bbcde05cd286188946d4349a73aea82d551407ce65dd37a6af",
+    "client/package-lock.json": "fa78c1222ca82b84f87f295d8523317fd50fe9e595ae4ea7120a239e32df68fc"
+  },
+  "validatedEnvironment": {
+    "node": "22.20.0",
+    "npm": "10.9.3",
+    "os": "macOS arm64",
+    "mongo": "8.0.5 isolated loopback"
+  },
+  "productionVersionObserved": false,
+  "dockerImageBootVerified": false,
+  "tenantOptInEnforcementImplemented": false,
+  "deploymentReady": false
+}

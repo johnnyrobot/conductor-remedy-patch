@@ -1,0 +1,887 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Conductor Patch Dev <johnnyrobot@users.noreply.github.com>
+Date: Wed, 28 Oct 2026 23:53:12 -0700
+Subject: [PATCH 15/17] fix(a11y): bind page actions and reviews to current
+ evidence
+
+LT-117, LT-109: share stored-target page actions and invalidate before possible writes.
+Reject delayed pre-write scan evidence and reset the mounted reviewer form when its
+fingerprint or scope changes.
+
+Author-Model: GPT-6
+---
+ .../projects/ConformanceReview.test.tsx       |  76 ++++++
+ .../components/projects/ConformanceReview.tsx |   4 +-
+ .../projects/ProjectAccessibility.jsx         |  51 +---
+ .../projects/RemediationPageActions.tsx       |   2 +-
+ server/api/projects.js                        | 246 ++----------------
+ server/api/remediationactions.ts              |  53 +++-
+ server/integration/remedy-routes.test.ts      | 161 ++++++++++++
+ server/package.json                           |   3 +-
+ server/util/a11yreviewutils.ts                |   1 +
+ server/util/remediationactions.test.ts        |  12 +-
+ 10 files changed, 337 insertions(+), 272 deletions(-)
+ create mode 100644 client/src/components/projects/ConformanceReview.test.tsx
+ create mode 100644 server/integration/remedy-routes.test.ts
+
+diff --git a/client/src/components/projects/ConformanceReview.test.tsx b/client/src/components/projects/ConformanceReview.test.tsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..c0c054d486f1dbcc720b89a0a06b7af450868667
+--- /dev/null
++++ b/client/src/components/projects/ConformanceReview.test.tsx
+@@ -0,0 +1,76 @@
++import React from 'react';
++import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
++import { afterEach, test, expect, vi } from 'vitest';
++import ConformanceReview from './ConformanceReview';
++
++afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
++
++function setup() {
++  let fingerprint: string | null = 'evidence-A';
++  let scopeVersion = 'scope-1';
++  const submissions: any[] = [];
++  vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
++    if (init?.method === 'POST') submissions.push(JSON.parse(init.body));
++    return { ok: true, json: async () => ({ err: false, canEdit: true, report: {
++      scope: { version: scopeVersion }, pages: [{ sectionID: 'page1', title: 'Synthetic article', url: 'https://fixture.invalid/',
++        fingerprint, blockers: [], criteria: [{ id: '1.1.1', title: 'Non-text Content', status: 'unreviewed', checklist: ['Compare every image with its description'] }] }],
++      verificationPercent: 0, verifiedCriteria: 0, totalCriteria: 50, status: 'verification_pending', readyForSignoff: false, digest: 'digest', remediationHandoff: null,
++    } }) };
++  }));
++  render(<ConformanceReview projectID="synthetic" sections={[]} />);
++  return { submissions, changeEvidence(value: string | null) { fingerprint = value; }, changeScope(value: string) { scopeVersion = value; } };
++}
++async function fillReview() {
++  fireEvent.change(await screen.findByLabelText('Page to evaluate'), { target: { value: 'page1' } });
++  fireEvent.click(screen.getByLabelText('Compare every image with its description'));
++  fireEvent.change(screen.getByLabelText(/Test environment/), { target: { value: 'Synthetic browser and screen reader' } });
++  fireEvent.change(screen.getByLabelText(/Evidence and results/), { target: { value: 'I compared all descriptions against the current synthetic article.' } });
++  fireEvent.click(screen.getByLabelText(/I performed this review/));
++}
++async function refresh() {
++  const calls = vi.mocked(fetch).mock.calls.length;
++  fireEvent.click(screen.getByRole('button', { name: 'Refresh verification' }));
++  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(calls + 1));
++}
++
++test('changed evidence requires a new checklist and confirmation before saving', async () => {
++  const fixture = setup();
++  await fillReview();
++  fixture.changeEvidence('evidence-B');
++  await refresh();
++  await waitFor(() => expect(screen.getByLabelText(/I performed this review/)).not.toBeChecked());
++  expect(screen.getByLabelText('Compare every image with its description')).not.toBeChecked();
++  expect(screen.getByRole('button', { name: 'Save reviewer evidence' })).toBeDisabled();
++  expect(screen.getByLabelText('Page to evaluate')).toHaveValue('page1');
++  expect(screen.getByLabelText('Criterion')).toHaveValue('1.1.1');
++  expect(fixture.submissions).toEqual([]);
++  await fillReview();
++  fireEvent.click(screen.getByRole('button', { name: 'Save reviewer evidence' }));
++  await waitFor(() => expect(fixture.submissions).toHaveLength(1));
++  expect(fixture.submissions[0]).toMatchObject({ fingerprint: 'evidence-B', confirmed: true, checks: [0] });
++});
++
++test('scope changes reset the review while unchanged identity preserves a draft', async () => {
++  const fixture = setup();
++  await fillReview();
++  await refresh();
++  expect(screen.getByLabelText(/I performed this review/)).toBeChecked();
++  expect(screen.getByLabelText(/Evidence and results/)).toHaveValue('I compared all descriptions against the current synthetic article.');
++  fixture.changeScope('scope-2');
++  await refresh();
++  await waitFor(() => expect(screen.getByLabelText(/I performed this review/)).not.toBeChecked());
++  expect(screen.getByLabelText('Compare every image with its description')).not.toBeChecked();
++  expect(screen.getByRole('button', { name: 'Save reviewer evidence' })).toBeDisabled();
++  expect(fixture.submissions).toEqual([]);
++});
++
++test('invalidated evidence cannot be confirmed and saved', async () => {
++  const fixture = setup();
++  await fillReview();
++  fixture.changeEvidence(null);
++  await refresh();
++  await waitFor(() => expect(screen.getByLabelText(/I performed this review/)).not.toBeChecked());
++  await fillReview();
++  expect(screen.getByRole('button', { name: 'Save reviewer evidence' })).toBeDisabled();
++  expect(fixture.submissions).toEqual([]);
++});
+diff --git a/client/src/components/projects/ConformanceReview.tsx b/client/src/components/projects/ConformanceReview.tsx
+index 27543b2ae7ca9ae65d135f2e0c1167213881f3b9..a6eb43920256461afe04b25b7ebdc63a7a851919 100644
+--- a/client/src/components/projects/ConformanceReview.tsx
++++ b/client/src/components/projects/ConformanceReview.tsx
+@@ -16,7 +16,7 @@ function ReviewForm({page,criterion,scope,save,busy}:any) {
+     <label>Evidence and results, including all scanner incomplete checks for this criterion<textarea required rows={4} minLength={20} maxLength={12000} value={notes} onChange={e=>setNotes(e.target.value)}/></label>
+     <label>Evidence attachment links (HTTPS, one per line)<textarea rows={2} value={refs} onChange={e=>setRefs(e.target.value)}/></label>
+     <label><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/> I performed this review over the defined scope and confirm the evidence supports this outcome.</label>
+-    <button className="ui primary button" disabled={busy || !scope || !confirmed}>Save reviewer evidence</button>
++    <button className="ui primary button" disabled={busy || !scope || !page.fingerprint || !confirmed || checks.length !== criterion.checklist.length}>Save reviewer evidence</button>
+   </form>;
+ }
+ function HandoffSignoff({handoff,canEdit,save,busy}:any) {
+@@ -75,7 +75,7 @@ export default function ConformanceReview({projectID,sections,onScanSaved}:any)
+         {page.blockers.length>0 && <ul>{page.blockers.map((b:string)=><li key={b}>{b}</li>)}</ul>}
+         <details><summary>Rendered scan evidence and unresolved checks</summary><pre>{JSON.stringify(page.sourceScan?.rendered || {state:'not_tested'},null,2)}</pre></details>
+         <label>Criterion<select value={criterionID} onChange={e=>setCriterionID(e.target.value)}>{page.criteria.map((c:any)=><option key={c.id} value={c.id}>{c.id} {c.title} — {c.status.replace(/_/g,' ')}</option>)}</select></label>
+-        {criterion && data.canEdit && <ReviewForm key={`${sectionID}-${criterionID}-${report.scope?.version}`} page={page} criterion={criterion} scope={report.scope} save={save} busy={busy}/>}
++        {criterion && data.canEdit && <ReviewForm key={JSON.stringify([sectionID, criterionID, report.scope?.version, page.fingerprint])} page={page} criterion={criterion} scope={report.scope} save={save} busy={busy}/>}
+       </>}
+       <details><summary>Reviewer conformance sign-off</summary><p>Available after every criterion on every scoped page has fresh evidence and no unresolved failures. Legal exceptions do not establish WCAG conformance.</p>
+         {report.signoff && <p>Signed by {report.signoff.actor} on {new Date(report.signoff.at).toLocaleString()}: {report.signoff.statement}</p>}
+diff --git a/client/src/components/projects/ProjectAccessibility.jsx b/client/src/components/projects/ProjectAccessibility.jsx
+index 17a640baed6495c1b6cbd3d470640dcb8af12235..171b3bfdc83e175f59acf680b08bd80690d3bb7b 100644
+--- a/client/src/components/projects/ProjectAccessibility.jsx
++++ b/client/src/components/projects/ProjectAccessibility.jsx
+@@ -393,8 +393,9 @@ const ApplyResultPanel = ({ applyResult }) => {
+     if (!applyResult) return null;
+     return (
+         <Segment color='green' className='mt-1p'>
+-            <Header as='h4'>Apply complete</Header>
+-            <p>Remedy wrote the selected changes and refreshed this page's WCAG review.</p>
++            <Header as='h4'>{applyResult.applied === false ? 'No changes written' : 'Apply complete'}</Header>
++            <p>{applyResult.applied === false ? 'The reviewed preview did not change the page.' : 'Remedy wrote the selected changes.'} {applyResult.scanError ? 'Fresh scan evidence is still required.' : 'The page scan was refreshed. Reviewer verification remains independent.'}</p>
++            {applyResult.scanError && <p role='alert'>{applyResult.scanError}</p>}
+             {applyResult.revision_summary && <p><strong>Revision:</strong> {applyResult.revision_summary}</p>}
+             {applyResult.snapshot_path && <p><strong>Snapshot:</strong> {applyResult.snapshot_path}</p>}
+             <div className='remedy-rule-summary'>
+@@ -696,7 +697,7 @@ const ProjectAccessibility = (props) => {
+     const getReviewSections = (options = {}) => {
+         const { persistScore = false } = options;
+         setLoadingData(true);
+-        axios.get('/project/accessibility/sections', {
++        return axios.get('/project/accessibility/sections', {
+             params: {
+                 projectID: props.match.params.id
+             }
+@@ -1256,35 +1257,6 @@ const ProjectAccessibility = (props) => {
+         setFixReviewed(false);
+     };
+ 
+-    const refreshSectionAfterApply = async (section, findingsForRefresh) => {
+-        const res = await axios.post('/project/accessibility/remedy/scan', {
+-            projectID: props.match.params.id,
+-            sectionID: section._id,
+-            sectionURL: section.sectionURL,
+-            pageID: section.pageID,
+-            sectionTitle: section.sectionTitle,
+-        });
+-        if (res.data.err) {
+-            throw (new Error(res.data.errMsg));
+-        }
+-        const criteria = res.data.criteria || {};
+-        const nextFindings = Array.isArray(res.data.findings) ? res.data.findings : [];
+-        mergeSectionWcagState(
+-            section._id,
+-            getWcagReviewFromResponse(res.data),
+-            getDojExceptionsFromResponse(res.data),
+-        );
+-        const affectedCriteria = getAffectedCriteriaKeys(findingsForRefresh);
+-        mergeSectionLegacyCriteria(section._id, criteria, affectedCriteria, { onlyWhenMissing: false });
+-        await persistLegacyCriteriaUpdates({ suppressError: true });
+-
+-        setRemedyFindingsBySection((prev) => ({
+-            ...prev,
+-            [section._id]: nextFindings,
+-        }));
+-        schedulePersistA11yProgress(reviewSectionsRef.current);
+-    };
+-
+     const previewRemedyFix = async () => {
+         if (!activeFixSection || (remedyFixMode === 'deterministic' && selectedFindingIDs.length === 0)) {
+             return;
+@@ -1300,7 +1272,7 @@ const ProjectAccessibility = (props) => {
+                 : getSectionFixableFindings(activeFixSection._id).map((finding) => finding.id);
+             const res = await axios.post('/project/accessibility/remedy/preview', {
+                 projectID: props.match.params.id,
+-                sectionURL: activeFixSection.sectionURL,
++                sectionID: activeFixSection._id,
+                 pageID: activeFixSection.pageID,
+                 findingIDs,
+                 fixMode: remedyFixMode,
+@@ -1331,7 +1303,7 @@ const ProjectAccessibility = (props) => {
+                 : getSectionFixableFindings(activeFixSection._id).map((finding) => finding.id);
+             const res = await axios.post('/project/accessibility/remedy/apply', {
+                 projectID: props.match.params.id,
+-                sectionURL: activeFixSection.sectionURL,
++                sectionID: activeFixSection._id,
+                 pageID: activeFixSection.pageID,
+                 findingIDs,
+                 previewHash: previewData.preview_hash,
+@@ -1342,13 +1314,14 @@ const ProjectAccessibility = (props) => {
+             if (res.data.err) {
+                 throw (new Error(res.data.errMsg));
+             }
+-            const refreshFindings = remedyFixMode === 'pipeline'
+-                ? getSectionFixableFindings(activeFixSection._id)
+-                : getSectionFixableFindings(activeFixSection._id)
+-                    .filter((finding) => selectedFindingIDs.includes(finding.id));
+-            await refreshSectionAfterApply(activeFixSection, refreshFindings);
+             setApplyResult(res.data);
++            setPreviewData(null);
++            if (res.data.scan) setRemedyFindingsBySection(prev => ({ ...prev, [activeFixSection._id]: res.data.scan.findings || [] }));
++            // The server owns rescan and invalidation, even if this browser closes.
++            await getReviewSections({ persistScore: true });
+         } catch (err) {
++            setPreviewData(null);
++            await getReviewSections({ persistScore: true }).catch(() => {});
+             handleGlobalError(err);
+         } finally {
+             setApplyLoading(false);
+diff --git a/client/src/components/projects/RemediationPageActions.tsx b/client/src/components/projects/RemediationPageActions.tsx
+index df9850bb65d5ebf2a7557e1582215de6c1f931b9..4abc038ff9c02c35ef6ac3b1468816497f118c16 100644
+--- a/client/src/components/projects/RemediationPageActions.tsx
++++ b/client/src/components/projects/RemediationPageActions.tsx
+@@ -59,7 +59,7 @@ export default function RemediationPageActions({ base, section, item, request, r
+         setMessage(`${outcome} ${result.scanError || result.evidenceError || (item ? 'Rescan complete; evidence attached. Final verification remains with the reviewer.' : 'Rescan complete. Matrix updated. Final verification remains with the reviewer.')}`);
+       }
+       await refreshed();
+-    } catch (e: any) { setError(e.message); if (action === 'apply' || action === 'restore') invalidate(); }
++    } catch (e: any) { setError(e.message); if (action === 'apply' || action === 'restore') { invalidate(); onScanSaved?.(); } }
+     finally { setBusy(false); }
+   }
+   const images: any[] = [];
+diff --git a/server/api/projects.js b/server/api/projects.js
+index b299f680fe30bb8371f1c1e36776601e55644b48..7d78eacb149504d5f4b2d0e10736502efda73402 100644
+--- a/server/api/projects.js
++++ b/server/api/projects.js
+@@ -18,6 +18,8 @@ import multer from 'multer';
+ import { v4 } from 'uuid';
+ import User, { DEFAULT_PINNED_PROJECTS } from '../models/user.js';
+ import Project from '../models/project.js';
++import { projectAssignees } from '../util/remediationqueue.js';
++import { createRemediationActionHandler } from './remediationactions.js';
+ import Book from '../models/book.js';
+ import Tag from '../models/tag.js';
+ import Task from '../models/task.js';
+@@ -2913,47 +2915,6 @@ const getProjectRemedyErrorMessage = (err) => {
+ };
+ 
+ 
+-const proxyProjectRemedyRequest = async (endpoint, body) => {
+-    return axios.post(
+-        `${getProjectRemedyBaseUrl()}${endpoint}`,
+-        body,
+-        {
+-            headers: getProjectRemedyHeaders(),
+-            validateStatus: () => true,
+-        },
+-    ).then((response) => {
+-        if (response.status >= 200 && response.status < 300) {
+-            return response.data;
+-        }
+-        const detail = response.data?.detail;
+-        const err = new Error(
+-            typeof (detail) === 'string'
+-                ? detail
+-                : (typeof (detail?.message) === 'string' ? detail.message : conductorErrors.err6),
+-        );
+-        err.backendStatus = response.status;
+-        err.backendCode = detail?.error;
+-        throw err;
+-    });
+-};
+-
+-
+-function pagePathFromSectionUrl(rawUrl) {
+-    if (!rawUrl || typeof rawUrl !== 'string') return '';
+-    try {
+-        const url = new URL(rawUrl);
+-        return decodeURIComponent(url.pathname.replace(/^\/+/, ''));
+-    } catch (_e) {
+-        return rawUrl.replace(/^\/+/, '');
+-    }
+-}
+-
+-
+-function isSandboxSectionUrl(rawUrl) {
+-    const pagePath = pagePathFromSectionUrl(rawUrl);
+-    return /(^|\/)Sandboxes(\/|$)/.test(pagePath);
+-}
+-
+ const checkProjectRemedyHealth = async (_req, res) => {
+     try {
+         const response = await axios.get(`${getProjectRemedyBaseUrl()}/healthz`, {
+@@ -2977,171 +2938,34 @@ const checkProjectRemedyHealth = async (_req, res) => {
+ };
+ 
+ 
+-const scanA11YWithRemedy = async (req, res) => {
+-    let authorizedSection;
++const matrixRemedyAction = (action) => async (req, res) => {
+     try {
+-        const project = await Project.findOne({
+-            projectID: req.body.projectID,
+-        }).lean();
+-        if (!project) {
+-            throw (new Error('notfound'));
+-        }
+-        if (!checkProjectMemberPermission(project, req.user)) {
+-            throw (new Error('unauth'));
+-        }
+-
+-        const currentSection = Array.isArray(project.a11yReview)
+-            ? project.a11yReview.find((section) => String(section._id) === String(req.body.sectionID))
+-            : undefined;
+-
+-        if (!currentSection) throw new Error('notfound');
+-        authorizedSection = currentSection;
+-        const data = await proxyProjectRemedyRequest('/v1/cxone/page/scan', {
+-            page_url: currentSection.sectionURL,
+-            section_title: currentSection.sectionTitle,
+-            wcag_review: currentSection?.wcagReview,
+-            doj_exceptions: Array.isArray(currentSection?.dojExceptions) ? currentSection.dojExceptions : [],
+-        });
+-
+-        if (req.body.sectionID && (data.wcag_review || data.wcagReview || data.doj_exceptions || data.dojExceptions)) {
+-            const wcagReview = data.wcag_review || data.wcagReview;
+-            const dojExceptions = data.doj_exceptions || data.dojExceptions || [];
+-            const toSet = { 'a11yReview.$.remedyError': '' };
+-            if (wcagReview) {
+-                toSet['a11yReview.$.wcagReview'] = wcagReview;
+-            }
+-            if (Array.isArray(dojExceptions)) {
+-                toSet['a11yReview.$.dojExceptions'] = dojExceptions;
+-            }
+-            if (Object.keys(toSet).length > 0) {
+-                await Project.updateOne({
+-                    projectID: project.projectID,
+-                    'a11yReview._id': req.body.sectionID,
+-                }, {
+-                    $set: toSet,
+-                });
+-            }
+-        }
+-
+-        return res.send({
+-            err: false,
+-            ...data,
+-        });
+-    } catch (err) {
+-        if (authorizedSection) await Project.updateOne({projectID:req.body.projectID,'a11yReview._id':authorizedSection._id}, {$unset:{'a11yReview.$.wcagReview.rendered':'','a11yReview.$.wcagReview.sourceHash':''},$set:{'a11yReview.$.remedyError':'Latest scan failed. Rescan required.'}}).catch(()=>{});
+-        let errMsg = conductorErrors.err6;
+-        let error = undefined;
+-        if (err.message === 'notfound') {
+-            errMsg = conductorErrors.err11;
+-        } else if (err.message === 'unauth') {
+-            errMsg = conductorErrors.err8;
+-        } else {
+-            errMsg = getProjectRemedyErrorMessage(err);
+-            error = err.backendCode;
+-        }
+-        return res.send({
+-            err: true,
+-            errMsg,
+-            error,
+-            status: err.backendStatus,
+-        });
+-    }
+-};
+-
+-
+-const previewA11YWithRemedy = async (req, res) => {
+-    try {
+-        const project = await Project.findOne({
+-            projectID: req.body.projectID,
+-        }).lean();
+-        if (!project) {
+-            throw (new Error('notfound'));
+-        }
+-        if (!checkProjectMemberPermission(project, req.user)) {
+-            throw (new Error('unauth'));
++        const project = await Project.findOne({ projectID: req.body.projectID }).lean();
++        if (!project || !checkProjectMemberPermission(project, req.user)) {
++            return res.status(403).json({ err: true, errMsg: 'Project team access required.' });
+         }
+-
+-        const data = await proxyProjectRemedyRequest('/v1/cxone/page/preview-fix', {
+-            page_url: req.body.sectionURL,
+-            page_id: req.body.pageID,
+-            finding_ids: req.body.findingIDs,
+-            fix_mode: req.body.fixMode,
+-            tier: req.body.tier,
+-        });
+-
+-        return res.send({
+-            err: false,
+-            ...data,
+-        });
+-    } catch (err) {
+-        let errMsg = conductorErrors.err6;
+-        let error = undefined;
+-        if (err.message === 'notfound') {
+-            errMsg = conductorErrors.err11;
+-        } else if (err.message === 'unauth') {
+-            errMsg = conductorErrors.err8;
+-        } else {
+-            errMsg = getProjectRemedyErrorMessage(err);
+-            error = err.backendCode;
++        if (!(projectAssignees(project).includes(req.user.decoded.uuid)
++            || authAPI.checkHasRole(req.user, 'libretexts', ['superadmin', 'support']))) {
++            return res.status(403).json({ err: true, errMsg: 'Project editing permission required.' });
+         }
+-        return res.send({
+-            err: true,
+-            errMsg,
+-            error,
+-        });
++        // Only stored section identity and explicitly supported action inputs cross this seam.
++        return createRemediationActionHandler({ Project })({
++            user: req.user,
++            queueProject: project,
++            params: { projectID: project.projectID, sectionID: req.body.sectionID, action },
++            body: {
++                findingIDs: req.body.findingIDs, fixMode: req.body.fixMode, tier: req.body.tier,
++                previewHash: req.body.previewHash, previewToken: req.body.previewToken,
++            },
++        }, res);
++    } catch (_error) {
++        return res.status(500).json({ err: true, errMsg: 'Unable to load the project page.' });
+     }
+ };
+ 
+-
+-const applyA11YWithRemedy = async (req, res) => {
+-    try {
+-        const project = await Project.findOne({
+-            projectID: req.body.projectID,
+-        }).lean();
+-        if (!project) {
+-            throw (new Error('notfound'));
+-        }
+-        if (!checkProjectMemberPermission(project, req.user)) {
+-            throw (new Error('unauth'));
+-        }
+-        if (req.body.sectionURL && !isSandboxSectionUrl(req.body.sectionURL)) {
+-            throw (new Error('nonsandbox'));
+-        }
+-
+-        const data = await proxyProjectRemedyRequest('/v1/cxone/page/apply-fix', {
+-            page_url: req.body.sectionURL,
+-            page_id: req.body.pageID,
+-            finding_ids: req.body.findingIDs,
+-            preview_hash: req.body.previewHash,
+-            preview_token: req.body.previewToken,
+-            fix_mode: req.body.fixMode,
+-            tier: req.body.tier,
+-        });
+-
+-        return res.send({
+-            err: false,
+-            ...data,
+-        });
+-    } catch (err) {
+-        let errMsg = conductorErrors.err6;
+-        let error = undefined;
+-        if (err.message === 'notfound') {
+-            errMsg = conductorErrors.err11;
+-        } else if (err.message === 'unauth') {
+-            errMsg = conductorErrors.err8;
+-        } else if (err.message === 'nonsandbox') {
+-            errMsg = 'Remedy apply is limited to Sandboxes/ pages.';
+-        } else {
+-            errMsg = getProjectRemedyErrorMessage(err);
+-            error = err.backendCode;
+-        }
+-        return res.send({
+-            err: true,
+-            errMsg,
+-            error,
+-        });
+-    }
+-};
++const scanA11YWithRemedy = matrixRemedyAction('scan');
++const previewA11YWithRemedy = matrixRemedyAction('preview');
++const applyA11YWithRemedy = matrixRemedyAction('apply');
+ 
+ 
+ const importA11YSectionsFromTOC = async (req, res) => {
+@@ -4329,21 +4153,16 @@ const validate = (method) => {
+           body('projectID', conductorErrors.err1).exists().isString().isLength({ min: 10, max: 10 }),
+           body('sectionURL', conductorErrors.err1).optional({ checkFalsy: true }).isString(),
+           body('sectionTitle', conductorErrors.err1).optional({ checkFalsy: true }).isString(),
+-          body('sectionID', conductorErrors.err1).optional({ checkFalsy: true }).isMongoId(),
++          body('sectionID', conductorErrors.err1).exists().isMongoId(),
+           body('pageID', conductorErrors.err1).optional({ checkFalsy: true }).custom((value) => {
+               if (typeof (value) === 'number') return true;
+               if (typeof (value) === 'string' && value.length > 0) return true;
+               throw (new Error('page'));
+           }),
+-          body().custom((_value, { req }) => {
+-              if (!req.body.sectionURL && !req.body.pageID) {
+-                  throw (new Error('page'));
+-              }
+-              return true;
+-          }),
+       ]
+     case 'previewA11YWithRemedy':
+       return [
++          body('sectionID', conductorErrors.err1).exists().isMongoId(),
+           body('projectID', conductorErrors.err1).exists().isString().isLength({ min: 10, max: 10 }),
+           body('sectionURL', conductorErrors.err1).optional({ checkFalsy: true }).isString(),
+           body('pageID', conductorErrors.err1).optional({ checkFalsy: true }).custom((value) => {
+@@ -4355,15 +4174,10 @@ const validate = (method) => {
+           body('findingIDs.*', conductorErrors.err1).exists().isString(),
+           body('fixMode', conductorErrors.err1).optional({ checkFalsy: true }).isIn(['deterministic', 'pipeline']),
+           body('tier', conductorErrors.err1).optional({ checkFalsy: true }).isInt({ min: 1, max: 3 }),
+-          body().custom((_value, { req }) => {
+-              if (!req.body.sectionURL && !req.body.pageID) {
+-                  throw (new Error('page'));
+-              }
+-              return true;
+-          }),
+       ]
+     case 'applyA11YWithRemedy':
+       return [
++          body('sectionID', conductorErrors.err1).exists().isMongoId(),
+           body('projectID', conductorErrors.err1).exists().isString().isLength({ min: 10, max: 10 }),
+           body('sectionURL', conductorErrors.err1).optional({ checkFalsy: true }).isString(),
+           body('pageID', conductorErrors.err1).optional({ checkFalsy: true }).custom((value) => {
+@@ -4377,12 +4191,6 @@ const validate = (method) => {
+           body('previewToken', conductorErrors.err1).optional({ checkFalsy: true }).isString().isLength({ min: 8 }),
+           body('fixMode', conductorErrors.err1).optional({ checkFalsy: true }).isIn(['deterministic', 'pipeline']),
+           body('tier', conductorErrors.err1).optional({ checkFalsy: true }).isInt({ min: 1, max: 3 }),
+-          body().custom((_value, { req }) => {
+-              if (!req.body.sectionURL && !req.body.pageID) {
+-                  throw (new Error('page'));
+-              }
+-              return true;
+-          }),
+       ]
+     case 'requestProjectPublishing':
+       return [
+diff --git a/server/api/remediationactions.ts b/server/api/remediationactions.ts
+index d9a839f221848c54415234ee5876a996efc49383..e73f161967914ad2213ed07bf527fedc44d460c9 100644
+--- a/server/api/remediationactions.ts
++++ b/server/api/remediationactions.ts
+@@ -1,7 +1,13 @@
+ /** Page actions are always resolved from the authorized project's stored section. */
+ export function registerRemediationActions(router: any, { base, access, Project, WorkItems, bridge = callBridge }: any) {
+-  router.post(`${base}/page/:sectionID/:action`, ...access, async (req: any, res: any) => {
++  router.post(`${base}/page/:sectionID/:action`, ...access, createRemediationActionHandler({ Project, WorkItems, bridge }));
++}
++
++/** Both the legacy matrix and work queue use this same stored-target action path. */
++export function createRemediationActionHandler({ Project, WorkItems, bridge = callBridge }: any) {
++  return async (req: any, res: any) => {
+     let section: any;
++    let writeOutcome: string | undefined;
+     try {
+       section = (req.queueProject.a11yReview || []).find((s: any) => String(s._id) === req.params.sectionID);
+       if (!section) return res.status(404).json({ err: true, errMsg: 'Page is not in this project.' });
+@@ -10,11 +16,12 @@ export function registerRemediationActions(router: any, { base, access, Project,
+       if (!endpoints[action]) return res.status(400).json({ err: true, errMsg: 'Unknown page action.' });
+       const url = new URL(section.sectionURL);
+       const path = decodeURIComponent(url.pathname);
+-      if (url.protocol !== 'https:' || url.hostname !== 'dev.libretexts.org' || !(path === '/Sandboxes/johnnyphung' || path.startsWith('/Sandboxes/johnnyphung/'))) {
++      if (url.origin !== 'https://dev.libretexts.org' || url.username || url.password || path.split('/').some(p => p === '.' || p === '..') || !(path === '/Sandboxes/johnnyphung' || path.startsWith('/Sandboxes/johnnyphung/'))) {
+         return res.status(403).json({ err: true, errMsg: 'Remediation is limited to the Johnny sandbox.' });
+       }
+       const item = req.body.itemID ? await WorkItems.findOne({ _id: req.body.itemID, projectID: req.params.projectID, sectionID: req.params.sectionID }).lean() : null;
+       if (req.body.itemID && !item) return res.status(404).json({ err: true, errMsg: 'Work item is not on this project page.' });
++      let evidenceVersion = section.remedyEvidenceVersion || 0;
+       const page = { page_url: section.sectionURL, section_title: section.sectionTitle };
+       // Browser-provided URLs, IDs, snapshots paths and scan evidence are never forwarded.
+       const body = { ...page, finding_ids: req.body.findingIDs, fix_mode: req.body.fixMode,
+@@ -24,22 +31,49 @@ export function registerRemediationActions(router: any, { base, access, Project,
+         requested_by: req.user.decoded.uuid };
+       const scan = () => bridge('scan', { ...page, rendered: action === 'rendered-scan', wcag_review: section.wcagReview, doj_exceptions: section.dojExceptions || [] });
+       const persistScan = async (result: any) => {
+-        await Project.updateOne({ projectID: req.params.projectID, 'a11yReview._id': section._id }, {
++        const update = await Project.updateOne({ projectID: req.params.projectID, a11yReview: { $elemMatch: {
++          _id: section._id, remedyEvidenceVersion: evidenceVersion === 0 ? { $in: [null, 0] } : evidenceVersion,
++        } } }, {
+           $set: { 'a11yReview.$.wcagReview': result.wcag_review || result.wcagReview,
+             'a11yReview.$.dojExceptions': result.doj_exceptions || result.dojExceptions || [],
+             'a11yReview.$.remedyError': '', 'a11yReview.$.remedyLastScannedAt': new Date() },
+         });
++        if (update?.acknowledged === false || update?.matchedCount === 0) throw Error('Page changed while scanning. Rescan required.');
++      };
++      const isWrite = action === 'apply' || action === 'restore';
++      const invalidate = async () => {
++        const update = await Project.updateOne({ projectID: req.params.projectID, 'a11yReview._id': section._id }, {
++          $unset: { 'a11yReview.$.wcagReview.rendered': '', 'a11yReview.$.wcagReview.sourceHash': '' },
++          $set: { 'a11yReview.$.remedyError': 'Page write requires fresh scan evidence.' },
++          $inc: { 'a11yReview.$.remedyEvidenceVersion': 1 },
++        });
++        if (update?.acknowledged === false || update?.matchedCount === 0) throw Error('Page evidence could not be invalidated.');
++        evidenceVersion++;
+       };
++      if (isWrite) {
++        writeOutcome = 'not_started';
++        // Fail closed before dispatch: a process/client disconnect cannot leave an old approval current.
++        await invalidate();
++        writeOutcome = 'uncertain';
++      }
+       const result = ['scan', 'rendered-scan'].includes(action) ? await scan() : await bridge(endpoints[action], body);
++      if (isWrite) {
++        writeOutcome = result.applied === false || result.restored === false ? 'not_written'
++          : result.applied === true || result.restored === true ? 'written' : 'uncertain';
++        await invalidate();
++        if (writeOutcome === 'uncertain') return res.status(502).json({ err: true, writeOutcome, errMsg: 'Write outcome is unknown. Check the upstream page before any further write; do not retry automatically.' });
++      }
+       let scanResult = ['scan', 'rendered-scan'].includes(action) ? result : null;
+       let scanError: string | undefined;
+       if (action === 'apply' || action === 'restore') {
+-        await Project.updateOne({ projectID: req.params.projectID, 'a11yReview._id': section._id }, { $unset: { 'a11yReview.$.wcagReview.rendered': '', 'a11yReview.$.wcagReview.sourceHash': '' } });
+         try { scanResult = await scan(); } catch { scanError = 'The page action completed, but rescan failed. Use Rescan page to retry.'; }
+       }
+       if (scanResult) {
+         try { await persistScan(scanResult); } catch { scanError = 'Scan completed but the matrix could not be saved. Rescan to retry.'; }
+       }
++      if (scanError && ['scan', 'rendered-scan'].includes(action)) {
++        return res.status(409).json({ err: true, errMsg: scanError });
++      }
+       let evidenceError: string | undefined;
+       if (item && ['scan', 'rendered-scan', 'apply', 'restore'].includes(action)) {
+         const criterion = (scanResult?.wcag_review || scanResult?.wcagReview)?.criteria?.find((c: any) => c.id === item.criterionID);
+@@ -51,13 +85,16 @@ export function registerRemediationActions(router: any, { base, access, Project,
+           await WorkItems.updateOne({ _id: item._id, projectID: req.params.projectID }, { $push: { scanEvidence: evidence }, $inc: { version: 1 } });
+         } catch { evidenceError = 'Page action completed but task evidence could not be saved. Rescan from this task to retry.'; }
+       }
+-      res.json({ err: false, ...result, page_url: section.sectionURL, scan: scanResult ? { ...scanResult, page_url: section.sectionURL } : null, scanError, evidenceError });
++      res.json({ err: false, ...result, page_url: section.sectionURL, scan: scanResult ? { ...scanResult, page_url: section.sectionURL } : null, scanError, evidenceError, writeOutcome });
+     } catch (e: any) {
+       if (section && ['scan','rendered-scan','apply','restore'].includes(req.params.action)) {
+-        await Project.updateOne({projectID:req.params.projectID,'a11yReview._id':section._id}, {$unset:{'a11yReview.$.wcagReview.rendered':'','a11yReview.$.wcagReview.sourceHash':''},$set:{'a11yReview.$.remedyError':'Latest page action or scan failed. Rescan required.'}}).catch(()=>{});
++        await Project.updateOne({projectID:req.params.projectID,'a11yReview._id':section._id}, {$inc:{'a11yReview.$.remedyEvidenceVersion':1},$unset:{'a11yReview.$.wcagReview.rendered':'','a11yReview.$.wcagReview.sourceHash':''},$set:{'a11yReview.$.remedyError':'Latest page action or scan failed. Rescan required.'}}).catch(()=>{});
+       }
+-      res.status(e.status || 500).json({ err: true, errMsg: e.publicMessage || 'Page action failed. Refresh and try again.' }); }
+-  });
++      res.status(e.status || (writeOutcome === 'uncertain' ? 502 : 500)).json({ err: true, writeOutcome, errMsg: writeOutcome === 'uncertain'
++        ? 'Write outcome is unknown. Check the upstream page before any further write; do not retry automatically.'
++        : writeOutcome === 'written' ? 'Write completed, but evidence could not be saved. Do not repeat the write; rescan to recover.'
++        : e.publicMessage || 'Page action failed. Refresh and try again.' }); }
++  };
+ }
+ 
+ async function callBridge(action: string, body: unknown) {
+diff --git a/server/integration/remedy-routes.test.ts b/server/integration/remedy-routes.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..ba6fa62c45ca346483740d9575e870f3ef9187ab
+--- /dev/null
++++ b/server/integration/remedy-routes.test.ts
+@@ -0,0 +1,161 @@
++/** Real API router/auth/Mongo; only the external bridge is synthetic. */
++import test, { before, after, beforeEach } from 'node:test';
++import assert from 'node:assert/strict';
++import http from 'node:http';
++import { randomBytes, randomUUID } from 'node:crypto';
++import express from 'express';
++import cookieParser from 'cookie-parser';
++import mongoose from 'mongoose';
++import bcrypt from 'bcryptjs';
++import User from '../models/user.js';
++import Project from '../models/project.js';
++import { criteria } from '../util/conformance.js';
++
++const mongoURI = process.env.CONDUCTOR_TEST_MONGO_URI || '';
++assert.match(mongoURI, /^mongodb:\/\/(127\.0\.0\.1|localhost):\d+\/conductor_test_[\w-]+$/, 'Supply an isolated loopback conductor_test_ database.');
++process.env.SECRETKEY = randomBytes(48).toString('hex');
++process.env.PRODUCTIONURLS = 'http://localhost';
++process.env.ORG_ID = 'libretexts';
++process.env.APP_ENV = 'remedy_test';
++process.env.STRIPE_SECRET_KEY = 'sk_test_synthetic_not_real';
++process.env.OPENAI_API_KEY = 'synthetic_not_real';
++const password = randomBytes(24).toString('base64url');
++const users = Object.fromEntries(['editor','auditor','outsider'].map(name => [name, randomUUID()]));
++const projectID = 'audit00001', sectionID = '115000000000000000000001';
++const page = 'https://dev.libretexts.org/Sandboxes/johnnyphung/Conductor_test';
++let bridge: http.Server, appServer: http.Server, origin: string, cookies: Record<string,string> = {};
++let calls: { path: string; body: any }[] = [];
++let outcome = 'written', scanFails = false, changed = false;
++let observedVerified: number | undefined;
++let holdScan: (() => Promise<void>) | undefined;
++function scan() { const at = new Date().toISOString(), sourceHash = changed ? 'new-source' : 'old-source'; return { wcag_review: { sourceHash, scannedAt: at, criteria: criteria.map(c => ({ ...c, status: 'manual_review' })), rendered: { state: 'complete', sourceHash, renderedHash: changed ? 'new-render' : 'old-render', platformHash: 'platform', browser: 'synthetic', axeVersion: '4', scannedAt: at, violations: [] } }, findings: [], scanned_at: at }; }
++async function listen(server: http.Server) { await new Promise<void>(r => server.listen(0, '127.0.0.1', r)); return `http://127.0.0.1:${(server.address() as any).port}`; }
++async function request(path: string, method = 'GET', body?: any, user = 'editor') {
++  const response = await fetch(origin + '/api/v1' + path, { method, redirect: 'manual', headers: { 'Content-Type': 'application/json', ...(cookies[user] ? { cookie: cookies[user] } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
++  return { status: response.status, data: await response.json() };
++}
++const base = `/project/${projectID}/accessibility/workqueue`;
++const matrix = '/project/accessibility/remedy';
++const input = () => ({ projectID, sectionID, findingIDs: ['synthetic-finding'], previewHash: 'synthetic-hash', previewToken: 'synthetic-token' });
++before(async () => {
++  await mongoose.connect(mongoURI);
++  bridge = http.createServer(async (req, res) => {
++    let raw = ''; for await (const part of req) raw += part;
++    const body = raw ? JSON.parse(raw) : {};
++    calls.push({ path: req.url!, body });
++    if (req.url?.endsWith('/scan')) { if (scanFails) { res.writeHead(503); return res.end(JSON.stringify({ detail: 'Synthetic scanner offline' })); } const captured = scan(); if (holdScan) { const hold = holdScan; holdScan = undefined; await hold(); } res.setHeader('Content-Type','application/json'); return res.end(JSON.stringify(captured)); }
++    if (req.url?.endsWith('/apply-fix')) { observedVerified = (await request(base + '/conformance')).data.report.verifiedCriteria; changed = outcome !== 'noop'; if (outcome === 'uncertain') { res.destroy(); return; } res.setHeader('Content-Type','application/json'); return res.end(JSON.stringify({ applied: outcome !== 'noop' })); }
++    res.setHeader('Content-Type','application/json'); res.end(JSON.stringify({ before_html: '<p>before</p>', after_html: '<p>after</p>', preview_hash: 'synthetic-hash', preview_token: 'synthetic-token' }));
++  });
++  process.env.REMEDY_API_BASE_URL = await listen(bridge);
++  const { default: api } = await import('../api.js');
++  const app = express(); app.use(cookieParser()); app.use('/api/v1', api);
++  appServer = http.createServer(app); origin = await listen(appServer);
++  for (const [name, uuid] of Object.entries(users)) {
++    await User.create({ uuid, centralID: 'synthetic-' + name, email: `${name}@conductor-test.example.invalid`, firstName: 'Synthetic', lastName: name, authType: 'traditional', password: await bcrypt.hash(password, 4), roles: [{ org: 'libretexts', role: 'user' }] });
++    const r = await fetch(origin + '/api/v1/auth/fallback-auth', { method: 'POST', redirect: 'manual', headers: { 'Content-Type':'application/json' }, body: JSON.stringify({ email: `${name}@conductor-test.example.invalid`, password }) });
++    assert.equal(r.status, 302); cookies[name] = r.headers.getSetCookie().map(x => x.split(';')[0]).join('; ');
++  }
++});
++beforeEach(async () => {
++  await Project.deleteMany({ projectID });
++  await mongoose.connection.db!.collection('conformancerecords').deleteMany({ projectID });
++  await mongoose.connection.db!.collection('remediationworkitems').deleteMany({ projectID });
++  changed = false; scanFails = false; outcome = 'written'; calls = [];
++  await Project.create({ projectID, orgID: 'libretexts', title: 'Synthetic', members: [users.editor], leads: [], liaisons: [], auditors: [users.auditor], tags: [], a11yReview: [{ _id: new mongoose.Types.ObjectId(sectionID), sectionTitle: 'Stored title', sectionURL: page, pageID: '123', wcagReview: scan().wcag_review }] });
++  assert.equal((await request(base + '/conformance/scope', 'POST', { boundaries: 'Full synthetic test page', processes: 'Read all synthetic page content', platformVersion: 'Synthetic local test release', confirmed: true })).status, 200);
++  const report = (await request(base + '/conformance')).data.report;
++  assert.equal((await request(base + '/conformance/review', 'POST', { sectionID, criterionID: '1.1.1', fingerprint: report.pages[0].fingerprint, scopeVersion: report.scope.version, status: 'pass', notes: 'Verified the previous synthetic content.', environment: 'Synthetic local browser', evidenceURLs: [], checks: [0,1], confirmed: true })).status, 200);
++  assert.equal((await request(base + '/conformance')).data.report.verifiedCriteria, 1);
++});
++after(async () => {
++  if (appServer) await new Promise<void>(r => appServer.close(() => r()));
++  if (bridge) await new Promise<void>(r => bridge.close(() => r()));
++  if (mongoose.connection.readyState) { await mongoose.connection.dropDatabase(); await mongoose.disconnect(); }
++});
++
++test('matrix mutations deny auditors and outsiders before contacting the bridge', async () => {
++  for (const user of ['auditor','outsider']) for (const action of ['scan','preview','apply']) {
++    const r = await request(`${matrix}/${action}`, 'POST', { ...input(), sectionURL: page }, user);
++    assert.equal(r.status, 403, `${user} ${action}`);
++  }
++  assert.equal(calls.length, 0);
++});
++
++test('matrix actions resolve only stored sections and derive the reviewer from the session', async () => {
++  const forged = { ...input(), sectionURL: 'https://foreign.invalid/Sandboxes/other', pageID: 'forged', requested_by: users.outsider };
++  const preview = await request(`${matrix}/preview`, 'POST', forged);
++  assert.equal(preview.status, 200);
++  assert.equal(calls[0].body.page_url, page);
++  assert.equal(calls[0].body.page_id, undefined);
++  assert.equal(calls[0].body.requested_by, users.editor);
++  const count = calls.length;
++  for (const action of ['scan','preview','apply']) {
++    const r = await request(`${matrix}/${action}`, 'POST', { ...forged, sectionID: '115000000000000000000099' });
++    assert.equal(r.status, 404);
++  }
++  assert.equal(calls.length, count);
++});
++
++for (const [caller, path] of [['matrix', `${matrix}/apply`], ['queue', `${base}/page/${sectionID}/apply`]]) {
++  test(`${caller} invalidates old reviewer evidence before dispatch and survives a failed rescan`, async () => {
++    scanFails = true;
++    const result = await request(path, 'POST', input());
++    assert.equal(result.status, 200);
++    assert.equal(observedVerified, 0, 'old review must be invalid before the external write can happen');
++    assert.equal(result.data.writeOutcome, 'written');
++    assert.match(result.data.scanError, /rescan failed/i);
++    const report = (await request(base + '/conformance')).data.report;
++    assert.equal(report.verifiedCriteria, 0);
++    assert.equal(report.pages[0].fingerprint, null);
++    assert.equal(report.pages[0].criteria[0].status, 'stale');
++  });
++}
++
++for (const [caller, path] of [['matrix', `${matrix}/apply`], ['queue', `${base}/page/${sectionID}/apply`]]) {
++  test(`${caller} preserves a known no-op without claiming a write`, async () => {
++    outcome = 'noop';
++    const result = await request(path, 'POST', input());
++    assert.equal(result.status, 200);
++    assert.equal(result.data.applied, false);
++    assert.equal(result.data.writeOutcome, 'not_written');
++    assert.equal((await request(base + '/conformance')).data.report.verifiedCriteria, 1);
++  });
++  test(`${caller} reports an uncertain write and invalidates without retry or rescan`, async () => {
++    outcome = 'uncertain';
++    const result = await request(path, 'POST', input());
++    assert.equal(result.status, 502);
++    assert.equal(result.data.writeOutcome, 'uncertain');
++    assert.match(result.data.errMsg, /do not retry automatically/i);
++    assert.equal(calls.length, 1);
++    const report = (await request(base + '/conformance')).data.report;
++    assert.equal(report.verifiedCriteria, 0);
++    assert.equal(report.pages[0].fingerprint, null);
++  });
++}
++
++test('a scan started before a write cannot restore old reviewer evidence after that write', async () => {
++  let release!: () => void, started!: () => void;
++  const paused = new Promise<void>(r => { release = r; });
++  const entered = new Promise<void>(r => { started = r; });
++  holdScan = async () => { started(); await paused; };
++  const pendingScan = request(`${matrix}/scan`, 'POST', input());
++  await entered;
++  try {
++    const written = await request(`${matrix}/apply`, 'POST', input());
++    assert.equal(written.status, 200);
++    release();
++    await pendingScan;
++    const report = (await request(base + '/conformance')).data.report;
++    assert.equal(report.verifiedCriteria, 0, 'the delayed pre-write scan must not make the old review current');
++  } finally { release(); await pendingScan; }
++});
++
++test('matrix requires a stored section ID and preserves the existing sandbox restriction', async () => {
++  const missing = input(); delete (missing as any).sectionID;
++  assert.equal((await request(`${matrix}/preview`, 'POST', { ...missing, sectionURL: page })).status, 400);
++  assert.equal((await request(`${matrix}/scan`, 'POST', input(), '')).status, 401);
++  await Project.updateOne({ projectID, 'a11yReview._id': sectionID }, { $set: { 'a11yReview.$.sectionURL': 'https://dev.libretexts.org/Sandboxes/someone_else/Test' } });
++  for (const action of ['scan','preview','apply']) assert.equal((await request(`${matrix}/${action}`, 'POST', input())).status, 403);
++  assert.equal(calls.length, 0);
++});
+diff --git a/server/package.json b/server/package.json
+index 3079b8ad95d1c08644b68ec584255b9edb81b7bd..c94249362d1c043f5b5326beff0f8456c5a44dd5 100644
+--- a/server/package.json
++++ b/server/package.json
+@@ -10,7 +10,8 @@
+     "typecheck": "tsc --noEmit",
+     "test": "node --import tsx --test \"util/**/*.test.ts\"",
+     "start:prod": "node --experimental-specifier-resolution=node dist/server.js",
+-    "export:support": "tsx scripts/exportSanitizedSupportTickets.ts"
++    "export:support": "tsx scripts/exportSanitizedSupportTickets.ts",
++    "test:remedy-integration": "tsx --test integration/remedy-routes.test.ts"
+   },
+   "dependencies": {
+     "@aws-sdk/client-comprehend": "3.1039.0",
+diff --git a/server/util/a11yreviewutils.ts b/server/util/a11yreviewutils.ts
+index 8858ebc98f428b611cf93baff2df5544b51111d5..95d90fb15411ddb6e14554504b24c5bc66717962 100644
+--- a/server/util/a11yreviewutils.ts
++++ b/server/util/a11yreviewutils.ts
+@@ -45,6 +45,7 @@ export const a11ySectionReviewSchema = {
+     wcagReview: Schema.Types.Mixed,
+     dojExceptions: [Schema.Types.Mixed],
+     remedyStatus: String,
++    remedyEvidenceVersion: Number,
+     remedyLastScannedAt: Date,
+     remedyFindings: Array,
+     remedyWcagSummary: Object,
+diff --git a/server/util/remediationactions.test.ts b/server/util/remediationactions.test.ts
+index 157e81d8c8044451bd1bc3319fb4d89acdfd6551..c4d38eb06a365a5ca5a2235a3e50a23dd599fa9e 100644
+--- a/server/util/remediationactions.test.ts
++++ b/server/util/remediationactions.test.ts
+@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
+ import express from 'express';
+ import { registerRemediationQueue } from '../api/remediationqueue.js';
+ 
+-async function harness(run: (url: string, calls: any[], evidence: any[], row: any, updates: any[]) => Promise<void>, failScan = false) {
++async function harness(run: (url: string, calls: any[], evidence: any[], row: any, updates: any[]) => Promise<void>, failScan = false, failInvalidation = false) {
+   const calls: any[] = [], evidence: any[] = [], updates: any[] = [];
+   const section = { _id: 'section1', sectionURL: 'https://dev.libretexts.org/Sandboxes/johnnyphung/Test', sectionTitle: 'Test' };
+   const row = { _id: '012345678901234567890123', projectID: 'demo', sectionID: 'section1', ruleId: 'img-alt', selector: 'img', criterionID: '1.1.1', status: 'in_progress' };
+@@ -12,7 +12,7 @@ async function harness(run: (url: string, calls: any[], evidence: any[], row: an
+   registerRemediationQueue(app, {
+     auth: { verifyRequest: (req: any, res: any, next: any) => { if (!req.headers['x-user']) return res.sendStatus(401); req.user = { decoded: { uuid: req.headers['x-user'] } }; next(); }, getUserAttributes: (_r: any, _s: any, n: any) => n(), checkHasRole: () => false },
+     projects: { checkProjectMemberPermission: (p: any, u: any) => [...p.members, ...p.auditors].includes(u.decoded.uuid) },
+-    Project: { findOne: () => ({ lean: async () => project }), updateOne: async (_filter:any, update:any) => {updates.push(update);} }, User: {},
++    Project: { findOne: () => ({ lean: async () => project }), updateOne: async (_filter:any, update:any) => { if (failInvalidation) throw Error('Synthetic database unavailable'); updates.push(update); } }, User: {},
+     WorkItems: { findOne: (filter: any) => ({ lean: async () => filter._id === row._id && filter.sectionID === row.sectionID && filter.projectID === row.projectID ? row : null }), updateOne: async (_f: any, update: any) => { evidence.push(update.$push.scanEvidence); } },
+     bridge: async (action: string, body: any) => { calls.push({ action, body }); if (action === 'scan') { if (failScan) throw Error('down'); return { scanned_at: 'now', findings: [], wcag_review: { criteria: [{ id: '1.1.1', status: 'pass' }] } }; } return { applied: true, snapshot_path: '/data/snapshot.json' }; },
+   });
+@@ -64,3 +64,11 @@ test('rendered scans use the stored URL and failed rescans invalidate previous e
+  await harness(async(url,calls)=>{assert.equal((await send(`${url}/rendered-scan`,{page_url:'https://evil.test'})).status,200);assert.equal(calls[0].body.rendered,true);assert.match(calls[0].body.page_url,/johnnyphung/);});
+  await harness(async(url,_calls,_evidence,_row,updates)=>{assert.equal((await send(`${url}/scan`)).status,500);assert.ok(updates.some(u=>u.$unset?.['a11yReview.$.wcagReview.sourceHash'] === ''));},true);
+ });
++
++test('write is not dispatched if evidence invalidation cannot persist', async () => harness(async (url, calls) => {
++  const response = await send(`${url}/apply`);
++  assert.equal(response.status, 500);
++  const result = await response.json();
++  assert.equal(result.writeOutcome, 'not_started');
++  assert.equal(calls.length, 0);
++}, false, true));
+-- 
+2.54.0 (Apple Git-157)
+
