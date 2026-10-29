@@ -1,7 +1,7 @@
 # conductor-remedy-patch
 
 The **Conductor side** of the LibreTexts Remedy accessibility matrix, shipped as
-target-specific seventeen-patch `git am` series against upstream Conductor, with
+target-specific eighteen-patch `git am` series against upstream Conductor, with
 the original sixteen-patch delivery retained for history.
 
 This repository contains no Conductor source of its own. It is a delivery
@@ -20,10 +20,10 @@ targets selected by the Chief, not observations of the running production versio
 
 | Target | Manifest | Resulting source tree |
 |---|---|---|
-| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `5e49cc22e134f98dbad29a4ee4a7b8a1c1a13b26` |
-| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `61636f304ca81b983a481eb266ccf0550452e05f` |
+| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `295a2f2c27d41799c425957dcc50492a2ad420f9` |
+| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `1207a86ac1a3b87dc88eb8b112ea505a1b97fd2e` |
 
-Each manifest lists its own seventeen ordered patches and SHA-256 checksums. Use
+Each manifest lists its own eighteen ordered patches and SHA-256 checksums. Use
 Node 22 and a fresh **detached** clone; the command refuses a wrong base, dirty
 checkout, active branch, changed patch or escaping path before application.
 
@@ -49,6 +49,9 @@ explain the preserved upstream scripts, target-specific test corrections and ope
 release gates. **Production readiness is false** in both manifests. LT-131 still
 must implement server-enforced tenant opt-in/default disabled; a client flag is
 not enforcement. Never deploy an image selected by `latest`.
+
+[LT-126 regression evidence](docs/releases/lt126-evidence-import.md) records the
+atomic TOC guard and failed standalone-scan observer correction in patch 0018.
 
 The original sixteen patches in [`patches/`](patches/) and their old
 `1c1a5ec1` base remain intact for historical reproduction of PR #3. That base is
@@ -218,16 +221,17 @@ question flows. Full release validation still covers the coordinated stack.
 
 | Target | Server unit | Client unit | Authenticated route/Mongo | Builds |
 |---|---:|---:|---:|---|
-| Staging pinned `67301b35` | 55 pass | 270 pass | 12 pass | Client/server pass |
-| Released floor `352a657e` | 25 pass | 177 pass | 12 pass | Client/server pass |
+| Staging pinned `67301b35` | 55 pass | 271 pass | 19 pass | Client/server pass |
+| Released floor `352a657e` | 25 pass | 178 pass | 19 pass | Client/server pass |
 
-Fresh `npm ci` and checks used Node 22.20.0 / npm 10.9.3. Both built servers also
-reached real `/health` 200 under production mode with synthetic configuration and
-isolated MongoDB 8.0.5. This was a macOS process boot, **not a Docker image boot**.
-Standalone server typechecks still report the same 60 baseline diagnostic lines
-on each target; builds do not imply a clean full typecheck. Details and baseline
-failures/corrections are in the compatibility guide. Linux/container, real
-providers, production auth/topology and deployment remain unverified.
+LT-126 checks used Node 22.20.0 / npm 10.9.3 with the matching target's
+previously installed, unchanged lockfile dependencies. Both built servers reached
+real `/health` 200 under production mode with synthetic configuration and isolated
+MongoDB **7.0.14**. These were macOS process boots. The earlier compatibility
+checks used MongoDB 8.0.5; their standalone server typecheck retained 60 baseline
+diagnostic lines on each target. Full standalone server typechecks were not
+rerun for LT-126; builds do not imply they pass. Linux/container, real providers,
+production auth/topology and deployment remain unverified.
 
 ```bash
 # In this delivery repo, Node 22; no npm dependency installation is needed:

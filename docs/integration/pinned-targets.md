@@ -8,8 +8,8 @@ Atlas tier, cluster topology and orchestrator are unknown.
 
 | Role | Upstream commit | Version context | Delivered tree |
 |---|---|---|---|
-| Primary staging | `67301b35c3784ed73ba1a65011ef5a1d689abca1` | Root package says 2.156.2; Chief assessment reported image label 2.157.0-rc.4 | `5e49cc22e134f98dbad29a4ee4a7b8a1c1a13b26` |
-| Secondary released floor | `352a657ec6de7b317a70ad3f8f744bc6d5054d9d` | v2.156.2 | `61636f304ca81b983a481eb266ccf0550452e05f` |
+| Primary staging | `67301b35c3784ed73ba1a65011ef5a1d689abca1` | Root package says 2.156.2; Chief assessment reported image label 2.157.0-rc.4 | `295a2f2c27d41799c425957dcc50492a2ad420f9` |
+| Secondary released floor | `352a657ec6de7b317a70ad3f8f744bc6d5054d9d` | v2.156.2 | `1207a86ac1a3b87dc88eb8b112ea505a1b97fd2e` |
 
 The image label is assessment context, not a pulled/booted image or observation of
 production. Do not use `latest`; approved deployment must pin compatible image
@@ -17,7 +17,7 @@ versions and digests. This work preserves the upstream Dockerfile and supplies
 source/patch integrity manifests, not a finished image/deployment bundle.
 
 Use the explicit fresh detached-checkout command in the repository README. Each
-manifest binds the full base commit, seventeen ordered patch files, SHA-256s and
+manifest binds the full base commit, eighteen ordered patch files, SHA-256s and
 final Git tree. The application tool checks those inputs and repository state
 before `git am --3way`, then checks the resulting tree. It makes no network call,
 reset, abort, branch deletion or push. On unexpected Git failure it preserves the
@@ -178,8 +178,9 @@ and orchestrator are unknown and require the deployment owner's assessment.
 
 ## Remaining release gates
 
-LT-126 still blocks complete lifecycle safety (stale TOC array overwrite and failed
-standalone-scan parent refresh). LT-127 holds audited pending reconciliation and
+Patch 0018 addresses LT-126 stale TOC overwrite and failed standalone-scan parent
+refresh; [current regression evidence](../releases/lt126-evidence-import.md) records
+both target checks separately from the compatibility evidence above. LT-127 holds audited pending reconciliation and
 full no-op/failed-rescan evidence preservation; signed producer work waits for the
 exact approved LT-1 contract. LT-128 performance/read bounds, tenant enforcement
 LT-131, deadlines/cancellation, automated patch CI, full-stack Linux/auth/provider
