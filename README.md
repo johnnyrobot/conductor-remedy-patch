@@ -1,7 +1,7 @@
 # conductor-remedy-patch
 
 The **Conductor side** of the LibreTexts Remedy accessibility matrix, shipped as
-target-specific nineteen-patch `git am` series against upstream Conductor, with
+target-specific twenty-patch `git am` series against upstream Conductor, with
 the original sixteen-patch delivery retained for history.
 
 This repository contains no Conductor source of its own. It is a delivery
@@ -20,10 +20,10 @@ targets selected by the Chief, not observations of the running production versio
 
 | Target | Manifest | Resulting source tree |
 |---|---|---|
-| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `a87b1deeff6297d9e3fe54ae03426d77e12ab704` |
-| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `7f89aabab8acdc5417dc69d3cc8af2e13e63634c` |
+| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `13310416ccc17299cf0943cfa83f1c4871fa8c85` |
+| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `24b1a1bf096baa1759cc8745b4a30547e0d4ac1c` |
 
-Each manifest lists its own nineteen ordered patches and SHA-256 checksums. Use
+Each manifest lists its own twenty ordered patches and SHA-256 checksums. Use
 Node 22 and a fresh **detached** clone; the command refuses a wrong base, dirty
 checkout, active branch, changed patch or escaping path before application.
 
@@ -47,7 +47,11 @@ fixed. No automatic fetch, reset, abort, cleanup or push occurs.
 [Compatibility evidence, config policy and Mongo operations](docs/integration/pinned-targets.md)
 explain the preserved upstream scripts, target-specific test corrections and open
 release gates. **Production readiness is false** in both manifests. Patch0019 implements default-disabled, server-enforced tenant opt-in and explicit
-engine configuration. Signed operations/full-stack/deployment gates remain open. Never deploy an image selected by `latest`.
+engine configuration. Patch0020 supplies signed operations and read-only status lookup; production
+release still requires the remaining operational/deployment gates. Never deploy an image selected by `latest`.
+
+[LT-140 signed-operation and integration evidence](docs/releases/lt140-reviewed-operations.md)
+records patch0020, actual three-service HTTP validation and remaining gates.
 
 [LT-131 config and validation evidence](docs/releases/lt131-tenant-opt-in.md) records
 the server-owned opt-in/config/readiness policy in patch0019.
@@ -163,25 +167,34 @@ All under the existing authenticated project API:
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/project/accessibility/remedy/health` | Is the Remedy server reachable? Drives the health indicator in the UI. |
+| GET | `/project/accessibility/remedy/health?projectID=<projectID>` | Authenticated project readiness and effective scan/preview/mutate/status capability. |
 | POST | `/project/accessibility/remedy/scan` | Scan a section's CXone page, store findings + WCAG summary. |
 | POST | `/project/accessibility/remedy/preview` | Ask Remedy for a proposed fix. Returns an HTML diff and a `previewToken`. |
 | POST | `/project/accessibility/remedy/apply` | Apply a previously previewed fix. Requires the `previewToken`. |
 | PUT | `/project/accessibility/review/section/items` | Bulk-update checkbox matrix items for a section. |
 | GET / POST | `/project/:projectID/accessibility/workqueue` | List / create work items (page, criterion, finding evidence, owner, status). |
 | PATCH | `/project/:projectID/accessibility/workqueue/:itemID` | Change status, owner, note; history is appended, not rewritten. |
+| GET | `/project/:projectID/accessibility/workqueue/page/:sectionID/operations/:localID` | Authorized read-only lookup through the stored operation mapping; never unlocks or retries. |
 | POST | `/project/:projectID/accessibility/workqueue/page/:sectionID/:action` | `scan`, `rendered-scan`, `apply`, `restore` — proxied to the Remedy bridge; evidence attaches to an `itemID` if given. |
 | GET | `/project/:projectID/accessibility/workqueue/conformance` | The scoped WCAG verification report. |
 | GET | `/project/:projectID/accessibility/workqueue/conformance/report` | Authenticated export of that report. |
 | POST | `/project/:projectID/accessibility/workqueue/conformance/:action` | `scope`, `review`, `signoff`. Reviewer identity and timestamp are server-set; records are append-only. |
 
 Matrix, work-queue and conformance mutations require project edit permission.
-Work-queue and conformance GET requests provide read access to authorized project users. Nothing in them writes to CXone directly — every write goes through the
+Work-queue and conformance GET requests provide read access to authorized project
+users. Operation lookup additionally requires current edit permission and the
+original actor or existing support/superadmin policy. Nothing in them writes to CXone directly — every write goes through the
 bridge, which enforces its own sandbox guard.
 
-**A write must be bound to a reviewed preview.** The client sends the preview hash
-back and the server rejects a stale one, so a page that changed between preview
-and apply fails closed rather than overwriting someone's edit.
+**A write must be bound to a stored reviewed preview.** Preview/revision responses
+provide an opaque `localReviewID`, authoritative binding and integer expiry.
+Confirmation sends that ID, unchanged token/hash and `confirmed=true`. The server
+checks current permission, user/session, stored target, inputs and expiry, then
+persists issuer/jti intent atomically before dispatching a native Node22 Ed25519
+assertion. Browser subject/binding/nonce claims never override stored values.
+A proven changed source/TOC target invalidates old evidence. Matched no-ops preserve
+current evidence without rescanning; actual/unknown writes invalidate it. A status
+lookup is read-only and cannot clear a pending claim or repeat a write.
 
 ### Production configuration policy
 
@@ -223,15 +236,15 @@ question flows. Full release validation still covers the coordinated stack.
 
 | Target | Server unit | Client unit | Authenticated route/Mongo | Builds |
 |---|---:|---:|---:|---|
-| Staging pinned `67301b35` | 55 pass | 272 pass | 24 pass | Client/server pass |
-| Released floor `352a657e` | 25 pass | 179 pass | 24 pass | Client/server pass |
+| Staging pinned `67301b35` | 60 pass | 289 pass | 49 pass | Client/server pass |
+| Released floor `352a657e` | 30 pass | 196 pass | 49 pass | Client/server pass |
 
-LT-131 checks used Node 22.20.0 / npm 10.9.3 with the matching target's
+LT-140 checks used Node 22.20.0 / npm 10.9.3 with the matching target's
 previously installed, unchanged lockfile dependencies. Both built servers reached
 real `/health` 200 under production mode with synthetic configuration and isolated
 MongoDB **7.0.14**. These were macOS process boots. The earlier compatibility
 checks used MongoDB 8.0.5; their standalone server typecheck retained 60 baseline
-diagnostic lines on each target. LT-131 reran them: all60 diagnostics match the control after source-position
+diagnostic lines on each target. LT-140 reran them: all60 diagnostics match the control after source-position
 and equivalent scratch/dependency-root normalization; full server typecheck still fails. Linux/container, real providers,
 production auth/topology and deployment remain unverified.
 
