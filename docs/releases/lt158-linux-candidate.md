@@ -1,8 +1,32 @@
 # LT-158 pinned Linux candidate pipeline
 
-Execution is pending. No Linux image/health/authentication pass is claimed yet.
-This report will record actual run/artifact IDs and image identities after CI.
-The local Docker daemon is unavailable; there is no host/tsx substitute.
+Both Linux matrix targets passed [run 40928445744](https://github.com/johnnyrobot/conductor-remedy-patch/actions/runs/40928445744).
+The downloaded image archives, configuration IDs, entrypoint, architecture,
+Node version, source tree/manifest binding and absence of injected runtime
+credentials were independently checked. The local Docker daemon is unavailable;
+all image execution was real GitHub-hosted Linux, with no host/tsx substitute.
+
+| Target | Server / client / real auth-Mongo tests | Compiled production phases | Artifact |
+|---|---|---|---|
+| Staging | 62 / 293 / 66 pass | default-off, enabled, signer-disabled recovery pass | [12921309459](https://github.com/johnnyrobot/conductor-remedy-patch/actions/runs/40928445744/artifacts/12921309459) |
+| Released floor | 32 / 200 / 66 pass | default-off, enabled, signer-disabled recovery pass | [12922860330](https://github.com/johnnyrobot/conductor-remedy-patch/actions/runs/40928445744/artifacts/12922860330) |
+
+Both client/server builds pass under host Node 22.20.0; actual final images run
+Node 22.22.3 on Linux/amd64. Both controls and delivered source retain exactly
+60 standalone typecheck diagnostic lines and exit 2, with identical normalized
+full-output hashes. That is baseline-relative success, not a standalone pass.
+Exact image/archive IDs, SHA-256, input-manifest SHA, tested delivery merge
+commit, artifact digests/expiry, runtime-user value and counts are in
+[verified-candidates.json](evidence/lt158/verified-candidates.json). The tested
+input manifests originally said Docker boot unverified; these metadata-only
+results now reference the same unchanged source trees/checksums. Full raw logs
+are retained in artifacts and downloaded under `/tmp/conductor-lt158-evidence`.
+
+The first run failed honestly: release used an invalid dotted database name;
+staging correctly rejected an empty finding selection in the protocol fixture.
+No product validation was weakened. Explicit valid database names and an actual
+current nonempty fixture finding corrected both failures. Persisted post-write
+scan evidence and partial-startup cleanup assertions were also strengthened.
 
 The GitHub workflow reconstructs each pinned target from fresh control/patched
 clones, applies its complete manifest, independently installs unchanged lockfile

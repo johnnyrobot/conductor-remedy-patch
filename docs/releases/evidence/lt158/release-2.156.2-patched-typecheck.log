@@ -1,0 +1,167 @@
+
+> @conductor/server@1.0.0 typecheck
+> tsc --noEmit
+
+api/assettagframeworks.ts(66,24): error TS2352: Conversion of type '(FlattenMaps<AssetTagFrameworkInterface> & Required<{ _id: ObjectId; }> & { __v: number; })[]' to type 'AssetTagFrameworkInterfaceWithCampusDefault[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type 'FlattenMaps<AssetTagFrameworkInterface> & Required<{ _id: ObjectId; }> & { __v: number; }' is not comparable to type 'AssetTagFrameworkInterfaceWithCampusDefault'.
+    The types of 'collection.db.client' are incompatible between these types.
+      Type 'FlattenMaps<MongoClient>' is missing the following properties from type 'MongoClient': driverInfoList, _close
+api/assettagframeworks.ts(217,52): error TS2345: Argument of type 'ObjectId' is not assignable to parameter of type 'string'.
+api/assettagframeworks.ts(248,7): error TS2345: Argument of type 'ObjectId' is not assignable to parameter of type 'string'.
+api/assettagframeworks.ts(293,40): error TS2740: Type 'ObjectId' is missing the following properties from type 'ObjectId': schemaName, auto, $conditionalHandlers, OptionsConstructor, and 21 more.
+api/assettagframeworks.ts(301,42): error TS2740: Type 'ObjectId' is missing the following properties from type 'ObjectId': schemaName, auto, $conditionalHandlers, OptionsConstructor, and 21 more.
+api/assettagframeworks.ts(305,42): error TS2740: Type 'ObjectId' is missing the following properties from type 'ObjectId': schemaName, auto, $conditionalHandlers, OptionsConstructor, and 21 more.
+api/assettagframeworks.ts(310,40): error TS2740: Type 'ObjectId' is missing the following properties from type 'ObjectId': schemaName, auto, $conditionalHandlers, OptionsConstructor, and 21 more.
+api/books.ts(152,3): error TS2353: Object literal may only specify known properties, and '__v' does not exist in type 'Partial<Record<keyof BookInterface, number>>'.
+api/books.ts(758,54): error TS2345: Argument of type 'FlattenMaps<OrganizationInterface> & Required<{ _id: ObjectId; }> & { __v: number; }' is not assignable to parameter of type 'OrganizationInterface'.
+  The types of 'collection.conn.db' are incompatible between these types.
+    Type 'FlattenMaps<Db> | undefined' is not assignable to type 'Db | undefined'.
+      Type 'FlattenMaps<Db>' is not assignable to type 'Db'.
+        Types of property 'client' are incompatible.
+          Type 'FlattenMaps<MongoClient>' is missing the following properties from type 'MongoClient': driverInfoList, _close
+api/books.ts(915,5): error TS7053: Element implicitly has an 'any' type because expression of type '"$text"' can't be used to index type '{}'.
+  Property '$text' does not exist on type '{}'.
+api/books.ts(968,28): error TS2339: Property 'resources' does not exist on type '{}'.
+api/books.ts(969,42): error TS2339: Property 'resources' does not exist on type '{}'.
+api/books.ts(972,34): error TS2339: Property 'resources' does not exist on type '{}'.
+api/books.ts(973,20): error TS2339: Property 'isCustomEnabled' does not exist on type 'BookInterface'.
+api/books.ts(980,56): error TS2345: Argument of type '{}' is not assignable to parameter of type 'OrganizationInterface'.
+  Type '{}' is missing the following properties from type 'OrganizationInterface': orgID, active, name, subdomain, and 61 more.
+api/books.ts(983,34): error TS2339: Property 'isCampusBook' does not exist on type 'BookInterface'.
+api/books.ts(1148,54): error TS2345: Argument of type '(FlattenMaps<OrganizationInterface> & Required<{ _id: ObjectId; }> & { __v: number; }) | null' is not assignable to parameter of type 'OrganizationInterface'.
+  Type 'null' is not assignable to type 'OrganizationInterface'.
+api/books.ts(1154,9): error TS7053: Element implicitly has an 'any' type because expression of type '"$or"' can't be used to index type '{}'.
+  Property '$or' does not exist on type '{}'.
+api/books.ts(1160,9): error TS7053: Element implicitly has an 'any' type because expression of type '"$or"' can't be used to index type '{}'.
+  Property '$or' does not exist on type '{}'.
+api/books.ts(1878,7): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(pipeline?: PipelineStage[] | undefined, options?: AggregateOptions | undefined): Aggregate<any[]>', gave the following error.
+    Argument of type 'Error | Object[]' is not assignable to parameter of type 'PipelineStage[] | undefined'.
+      Type 'Error' is missing the following properties from type 'PipelineStage[]': length, pop, push, concat, and 35 more.
+  Overload 2 of 2, '(pipeline: PipelineStage[]): Aggregate<any[]>', gave the following error.
+    Argument of type 'Error | Object[]' is not assignable to parameter of type 'PipelineStage[]'.
+      Type 'Error' is missing the following properties from type 'PipelineStage[]': length, pop, push, concat, and 35 more.
+api/books.ts(2153,29): error TS2339: Property 'data' does not exist on type 'void | AxiosResponse<any, any, {}, any>'.
+  Property 'data' does not exist on type 'void'.
+api/books.ts(2161,20): error TS2339: Property 'data' does not exist on type 'void | AxiosResponse<any, any, {}, any>'.
+  Property 'data' does not exist on type 'void'.
+api/books.ts(2530,18): error TS2339: Property 'expected' does not exist on type '{ date: string; titles: never[]; }'.
+api/books.ts(2547,21): error TS2339: Property 'thumbnail_url' does not exist on type '{ publication_title: string; title_id: any; title_url: string; coverage_depth: string; access_type: string; publisher_name: string; }'.
+api/books.ts(2553,21): error TS2339: Property 'license' does not exist on type '{ publication_title: string; title_id: any; title_url: string; coverage_depth: string; access_type: string; publisher_name: string; }'.
+api/books.ts(2556,21): error TS2339: Property 'print_identifier' does not exist on type '{ publication_title: string; title_id: any; title_url: string; coverage_depth: string; access_type: string; publisher_name: string; }'.
+api/books.ts(2559,21): error TS2339: Property 'date_monograph_published_online' does not exist on type '{ publication_title: string; title_id: any; title_url: string; coverage_depth: string; access_type: string; publisher_name: string; }'.
+api/books.ts(2565,23): error TS2339: Property 'date_last_updated' does not exist on type '{ publication_title: string; title_id: any; title_url: string; coverage_depth: string; access_type: string; publisher_name: string; }'.
+api/books.ts(2572,21): error TS2339: Property 'description' does not exist on type '{ publication_title: string; title_id: any; title_url: string; coverage_depth: string; access_type: string; publisher_name: string; }'.
+api/books.ts(2575,21): error TS2339: Property 'language' does not exist on type '{ publication_title: string; title_id: any; title_url: string; coverage_depth: string; access_type: string; publisher_name: string; }'.
+api/books.ts(2577,21): error TS2339: Property 'language' does not exist on type '{ publication_title: string; title_id: any; title_url: string; coverage_depth: string; access_type: string; publisher_name: string; }'.
+api/books.ts(2587,34): error TS7006: Parameter 'author' implicitly has an 'any' type.
+api/books.ts(2602,49): error TS2339: Property 'authors' does not exist on type '{ publication_title: string; title_id: any; title_url: string; coverage_depth: string; access_type: string; publisher_name: string; }'.
+api/books.ts(2604,32): error TS2345: Argument of type '{ publication_title: string; title_id: any; title_url: string; coverage_depth: string; access_type: string; publisher_name: string; }' is not assignable to parameter of type 'never'.
+api/homework.ts(162,48): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(writes: AnyBulkWriteOperation<Document & { _id?: ObjectId | undefined; }>[], options: BulkWriteOptions & MongooseBulkWriteOptions & { ...; }): Promise<...>', gave the following error.
+    Argument of type 'AnyBulkWriteOperation[]' is not assignable to parameter of type 'AnyBulkWriteOperation<Document & { _id?: ObjectId | undefined; }>[]'.
+      Type 'AnyBulkWriteOperation' is not assignable to type 'AnyBulkWriteOperation<Document & { _id?: ObjectId | undefined; }>'.
+        Type '{ replaceOne: ReplaceOneModel<Document>; }' is not assignable to type 'AnyBulkWriteOperation<Document & { _id?: ObjectId | undefined; }>'.
+          Type '{ replaceOne: ReplaceOneModel<Document>; }' is not assignable to type '{ replaceOne: ReplaceOneModel<Document & { _id?: ObjectId | undefined; }>; }'.
+            Types of property 'replaceOne' are incompatible.
+              Type 'ReplaceOneModel<Document>' is not assignable to type 'ReplaceOneModel<Document & { _id?: ObjectId | undefined; }>'.
+                Type 'ReplaceOneModel<Document>' is not assignable to type '{ filter: FilterQuery<Document & { _id?: ObjectId | undefined; }>; }'.
+                  Types of property 'filter' are incompatible.
+                    Type 'Filter<Document>' is not assignable to type 'FilterQuery<Document & { _id?: ObjectId | undefined; }>'.
+                      Type 'Filter<Document>' is not assignable to type 'RootQuerySelector<Document & { _id?: ObjectId | undefined; }>'.
+                        Types of property '$and' are incompatible.
+                          Type 'Filter<WithId<Document>>[] | undefined' is not assignable to type 'FilterQuery<Document & { _id?: ObjectId | undefined; }>[] | undefined'.
+                            Type 'Filter<WithId<Document>>[]' is not assignable to type 'FilterQuery<Document & { _id?: ObjectId | undefined; }>[]'.
+                              Type 'Filter<WithId<Document>>' is not assignable to type 'FilterQuery<Document & { _id?: ObjectId | undefined; }>'.
+                                Type 'Filter<WithId<Document>>' is not assignable to type 'RootQuerySelector<Document & { _id?: ObjectId | undefined; }>'.
+                                  Types of property '$comment' are incompatible.
+                                    Type 'string | Document | undefined' is not assignable to type 'string | undefined'.
+                                      Type 'Document' is not assignable to type 'string'.
+  Overload 2 of 2, '(writes: AnyBulkWriteOperation<Document & { _id?: ObjectId | undefined; }>[], options?: (BulkWriteOptions & MongooseBulkWriteOptions) | undefined): Promise<...>', gave the following error.
+    Argument of type 'AnyBulkWriteOperation[]' is not assignable to parameter of type 'AnyBulkWriteOperation<Document & { _id?: ObjectId | undefined; }>[]'.
+      Type 'AnyBulkWriteOperation' is not assignable to type 'AnyBulkWriteOperation<Document & { _id?: ObjectId | undefined; }>'.
+        Type '{ replaceOne: ReplaceOneModel<Document>; }' is not assignable to type 'AnyBulkWriteOperation<Document & { _id?: ObjectId | undefined; }>'.
+          Type '{ replaceOne: ReplaceOneModel<Document>; }' is not assignable to type '{ replaceOne: ReplaceOneModel<Document & { _id?: ObjectId | undefined; }>; }'.
+            Types of property 'replaceOne' are incompatible.
+              Type 'ReplaceOneModel<Document>' is not assignable to type 'ReplaceOneModel<Document & { _id?: ObjectId | undefined; }>'.
+                Type 'ReplaceOneModel<Document>' is not assignable to type '{ filter: FilterQuery<Document & { _id?: ObjectId | undefined; }>; }'.
+                  Types of property 'filter' are incompatible.
+                    Type 'Filter<Document>' is not assignable to type 'FilterQuery<Document & { _id?: ObjectId | undefined; }>'.
+                      Type 'Filter<Document>' is not assignable to type 'RootQuerySelector<Document & { _id?: ObjectId | undefined; }>'.
+                        Types of property '$and' are incompatible.
+                          Type 'Filter<WithId<Document>>[] | undefined' is not assignable to type 'FilterQuery<Document & { _id?: ObjectId | undefined; }>[] | undefined'.
+                            Type 'Filter<WithId<Document>>[]' is not assignable to type 'FilterQuery<Document & { _id?: ObjectId | undefined; }>[]'.
+                              Type 'Filter<WithId<Document>>' is not assignable to type 'FilterQuery<Document & { _id?: ObjectId | undefined; }>'.
+                                Type 'Filter<WithId<Document>>' is not assignable to type 'RootQuerySelector<Document & { _id?: ObjectId | undefined; }>'.
+                                  Types of property '$comment' are incompatible.
+                                    Type 'string | Document | undefined' is not assignable to type 'string | undefined'.
+                                      Type 'Document' is not assignable to type 'string'.
+api/kb.ts(512,42): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(pipeline?: PipelineStage[] | undefined, options?: AggregateOptions | undefined): Aggregate<any[]>', gave the following error.
+    Argument of type 'Record<string, any>[]' is not assignable to parameter of type 'PipelineStage[]'.
+      Type 'Record<string, any>' is not assignable to type 'PipelineStage'.
+        Property '$vectorSearch' is missing in type 'Record<string, any>' but required in type 'VectorSearch'.
+  Overload 2 of 2, '(pipeline: PipelineStage[]): Aggregate<any[]>', gave the following error.
+    Argument of type 'Record<string, any>[]' is not assignable to parameter of type 'PipelineStage[]'.
+      Type 'Record<string, any>' is not assignable to type 'PipelineStage'.
+        Property '$vectorSearch' is missing in type 'Record<string, any>' but required in type 'VectorSearch'.
+api/kb.ts(565,50): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(pipeline?: PipelineStage[] | undefined, options?: AggregateOptions | undefined): Aggregate<any[]>', gave the following error.
+    Argument of type 'Record<string, any>[]' is not assignable to parameter of type 'PipelineStage[]'.
+      Type 'Record<string, any>' is not assignable to type 'PipelineStage'.
+        Property '$vectorSearch' is missing in type 'Record<string, any>' but required in type 'VectorSearch'.
+  Overload 2 of 2, '(pipeline: PipelineStage[]): Aggregate<any[]>', gave the following error.
+    Argument of type 'Record<string, any>[]' is not assignable to parameter of type 'PipelineStage[]'.
+      Type 'Record<string, any>' is not assignable to type 'PipelineStage'.
+        Property '$vectorSearch' is missing in type 'Record<string, any>' but required in type 'VectorSearch'.
+api/orgevents.ts(330,38): error TS2345: Argument of type 'FlattenMaps<OrgEventInterface> & Required<{ _id: ObjectId; }> & { __v: number; }' is not assignable to parameter of type 'OrgEventInterface'.
+  The types of 'collection.conn.db' are incompatible between these types.
+    Type 'FlattenMaps<Db> | undefined' is not assignable to type 'Db | undefined'.
+      Type 'FlattenMaps<Db>' is not assignable to type 'Db'.
+        Types of property 'client' are incompatible.
+          Type 'FlattenMaps<MongoClient>' is missing the following properties from type 'MongoClient': driverInfoList, _close
+api/orgevents.ts(443,38): error TS2345: Argument of type 'FlattenMaps<OrgEventInterface> & Required<{ _id: ObjectId; }> & { __v: number; }' is not assignable to parameter of type 'OrgEventInterface'.
+  The types of 'collection.conn.db' are incompatible between these types.
+    Type 'FlattenMaps<Db> | undefined' is not assignable to type 'Db | undefined'.
+      Type 'FlattenMaps<Db>' is not assignable to type 'Db'.
+        Types of property 'client' are incompatible.
+          Type 'FlattenMaps<MongoClient>' is missing the following properties from type 'MongoClient': driverInfoList, _close
+api/orgevents.ts(851,5): error TS2322: Type 'FlattenMaps<OrgEventFeeWaiverInterface> & Required<{ _id: ObjectId; }> & { __v: number; }' is not assignable to type 'OrgEventFeeWaiverInterface | null'.
+  Type 'FlattenMaps<OrgEventFeeWaiverInterface> & Required<{ _id: ObjectId; }> & { __v: number; }' is not assignable to type 'OrgEventFeeWaiverInterface'.
+    The types of 'collection.conn.db' are incompatible between these types.
+      Type 'FlattenMaps<Db> | undefined' is not assignable to type 'Db | undefined'.
+        Type 'FlattenMaps<Db>' is not assignable to type 'Db'.
+          Types of property 'client' are incompatible.
+            Type 'FlattenMaps<MongoClient>' is missing the following properties from type 'MongoClient': driverInfoList, _close
+api/projectfiles.ts(1586,23): error TS2352: Conversion of type '(FlattenMaps<ProjectFileInterface> & Required<{ _id: ObjectId; }> & { __v: number; })[]' to type 'ProjectFileInterface[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type 'FlattenMaps<ProjectFileInterface> & Required<{ _id: ObjectId; }> & { __v: number; }' is not comparable to type 'ProjectFileInterface'.
+    The types of 'collection.db.client' are incompatible between these types.
+      Type 'FlattenMaps<MongoClient>' is missing the following properties from type 'MongoClient': driverInfoList, _close
+api/projectfiles.ts(1592,19): error TS2352: Conversion of type '(FlattenMaps<ProjectFileInterface> & Required<{ _id: ObjectId; }> & { __v: number; })[]' to type 'ProjectFileInterface[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type 'FlattenMaps<ProjectFileInterface> & Required<{ _id: ObjectId; }> & { __v: number; }' is not comparable to type 'ProjectFileInterface'.
+    The types of 'collection.db.client' are incompatible between these types.
+      Type 'FlattenMaps<MongoClient>' is missing the following properties from type 'MongoClient': driverInfoList, _close
+api/projectfiles.ts(1877,28): error TS2322: Type 'Buffer<ArrayBufferLike>' is not assignable to type 'BlobPart'.
+  Type 'Buffer<ArrayBufferLike>' is not assignable to type 'ArrayBufferView<ArrayBuffer>'.
+    Types of property 'buffer' are incompatible.
+      Type 'ArrayBufferLike' is not assignable to type 'ArrayBuffer'.
+        Type 'SharedArrayBuffer' is missing the following properties from type 'ArrayBuffer': resizable, resize, detached, transfer, transferToFixedLength
+api/projectfiles.ts(2306,26): error TS2339: Property 'firstName' does not exist on type 'AuthorInterface'.
+api/projectfiles.ts(2310,26): error TS2339: Property 'lastName' does not exist on type 'AuthorInterface'.
+api/projectfiles.ts(2313,20): error TS2339: Property 'email' does not exist on type 'AuthorInterface'.
+api/projectfiles.ts(2315,28): error TS2339: Property 'email' does not exist on type 'AuthorInterface'.
+api/services/agent.ts(7,26): error TS2307: Cannot find module '@langchain/langgraph/prebuilt' or its corresponding type declarations.
+  There are types at '/home/runner/work/_temp/conductor-release-2.156.2-40928445744-1/patched/server/node_modules/@langchain/langgraph/dist/prebuilt/index.d.ts', but this result could not be resolved under your current 'moduleResolution' setting. Consider updating to 'node16', 'nodenext', or 'bundler'.
+api/services/ai-service.ts(5,28): error TS2307: Cannot find module 'openai/core' or its corresponding type declarations.
+api/services/stripe-service.ts(6,9): error TS2322: Type '"2025-05-28.basil"' is not assignable to type '"2025-08-27.basil"'.
+api/services/stripe-service.ts(14,17): error TS2322: Type '"2025-05-28.basil"' is not assignable to type '"2025-08-27.basil"'.
+node_modules/@libretexts/cxone-expert-node/dist/modules/base.d.ts(3,26): error TS7016: Could not find a declaration file for module 'debug'. '/home/runner/work/_temp/conductor-release-2.156.2-40928445744-1/patched/server/node_modules/debug/src/index.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/debug` if it exists or add a new declaration (.d.ts) file containing `declare module 'debug';`
+node_modules/react-timezone-select/dist/index.d.ts(33,133): error TS2503: Cannot find namespace 'JSX'.
+node_modules/zod-form-data/dist/index.d.ts(1,57): error TS2614: Module '"zod"' has no exported member 'ZodEffects'. Did you mean to use 'import ZodEffects from "zod"' instead?
+node_modules/zod-form-data/dist/index.d.ts(42,73): error TS2694: Namespace '"/home/runner/work/_temp/conductor-release-2.156.2-40928445744-1/patched/server/node_modules/zod/v4/classic/external"' has no exported member 'ZodEffects'.
+node_modules/zod-form-data/dist/index.d.ts(42,126): error TS2694: Namespace '"/home/runner/work/_temp/conductor-release-2.156.2-40928445744-1/patched/server/node_modules/zod/v4/classic/external"' has no exported member 'ZodEffects'.
+types/index.ts(1,15): error TS2306: File '/home/runner/work/_temp/conductor-release-2.156.2-40928445744-1/patched/server/types/AI.ts' is not a module.
+util/typeHelpers.ts(47,50): error TS2724: '"/home/runner/work/_temp/conductor-release-2.156.2-40928445744-1/patched/server/node_modules/zod/v4/classic/external"' has no exported member named 'AnyZodObject'. Did you mean 'ZodObject'?
+util/typeHelpers.ts(51,22): error TS18046: 'value._def.defaultValue' is of type 'unknown'.
+util/typeHelpers.ts(57,56): error TS2724: '"/home/runner/work/_temp/conductor-release-2.156.2-40928445744-1/patched/server/node_modules/zod/v4/classic/external"' has no exported member named 'AnyZodObject'. Did you mean 'ZodObject'?

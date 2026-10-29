@@ -1,0 +1,33 @@
+[
+  {
+    "name": "conductor",
+    "stopped": true
+  },
+  {
+    "name": "recovery",
+    "stopped": true
+  },
+  {
+    "name": "proxy",
+    "stopped": true
+  },
+  {
+    "name": "server",
+    "stopped": true
+  },
+  {
+    "name": "bridge",
+    "stopped": true
+  },
+  {
+    "ownedFixtureDatabaseDropped": true
+  },
+  {
+    "generatedCredentialsRemoved": true,
+    "rawSecretFieldsSanitized": true,
+    "syntheticLedgerAndAuditPreserved": true
+  },
+  {
+    "ownedLoopbackMongoStopped": true
+  }
+]

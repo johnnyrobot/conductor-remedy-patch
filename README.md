@@ -52,8 +52,9 @@ release still requires the remaining operational/deployment gates. Never deploy 
 
 [LT-158 Linux candidate validation](docs/releases/lt158-linux-candidate.md) documents
 the automated matrix and candidate artifact contract. Patch0024 pins the actual
-upstream Node22 Docker stages to one immutable base. Linux execution is pending
-until that report records successful CI; deployment approval remains separate.
+upstream Node22 Docker stages to one immutable base. Both final compiled Node22 production images passed Linux/amd64 CI with
+synthetic internal fixtures and archived candidates; full owned-stack Linux and
+production approval remain separate.
 
 [LT-127 explicit recovery evidence](docs/releases/lt127-explicit-recovery.md) records
 patch0023 and actual offline Bridge resolution followed by fresh local scan/CAS.
@@ -280,8 +281,9 @@ real `/health` 200 under production mode with synthetic configuration and isolat
 MongoDB **7.0.14**. These were macOS process boots. The earlier compatibility
 checks used MongoDB 8.0.5; their standalone server typecheck retained 60 baseline
 diagnostic lines on each target. LT-140 reran them: all60 diagnostics match the control after source-position
-and equivalent scratch/dependency-root normalization; full server typecheck still fails. Linux/container, real providers,
-production auth/topology and deployment remain unverified.
+and equivalent scratch/dependency-root normalization; full server typecheck still fails. LT-158 subsequently verified actual compiled Linux/amd64 images with synthetic
+internal fixtures. Full owned-stack Linux, real providers, production browser/SSO/
+topology and deployment remain separate gates.
 
 ```bash
 # In this delivery repo, Node 22; no npm dependency installation is needed:

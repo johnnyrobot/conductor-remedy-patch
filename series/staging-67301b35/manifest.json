@@ -142,7 +142,7 @@
     "mongo": "7.0.14 isolated loopback standalone"
   },
   "productionVersionObserved": false,
-  "dockerImageBootVerified": false,
+  "dockerImageBootVerified": true,
   "tenantOptInEnforcementImplemented": true,
   "deploymentReady": false,
   "signedReviewerOperationsImplemented": true,
@@ -177,6 +177,29 @@
       "node",
       "dist/server.js"
     ],
-    "status": "awaiting actual CI"
+    "status": "verified in Linux CI with synthetic internal fixtures"
+  },
+  "linuxCandidateValidation": {
+    "workflowRun": 40928445744,
+    "workflowURL": "https://github.com/johnnyrobot/conductor-remedy-patch/actions/runs/40928445744",
+    "artifactID": 12921309459,
+    "artifactURL": "https://github.com/johnnyrobot/conductor-remedy-patch/actions/runs/40928445744/artifacts/12921309459",
+    "artifactDigest": "sha256:4646de13e3dad8c4beb85c1fda3894e536499c7f9cb902f2a4934aad7c20fe09",
+    "artifactExpiresAt": "2026-11-12T18:20:49Z",
+    "validationManifestSHA256": "3443e34338ef53f877f94eebde56da9ecbf0d37c4604d02a77204ed95b9f7a31",
+    "imageID": "sha256:aecd988b06ae097684cf1f71b8fdf1d59a86475da963f373cba5ec922a5d37bc",
+    "archive": "conductor-candidate-staging-67301b35.tar.gz",
+    "archiveSHA256": "8c0b54869437146deac4fabd47b2ceb4e154f5a68c6dad13794ec88d3b941b07",
+    "platform": "linux/amd64",
+    "runtimeNode": "v22.22.3",
+    "runtimeUser": "",
+    "testCounts": {
+      "server-tests": 62,
+      "authenticated-routes": 66,
+      "client-tests": 293
+    },
+    "sourceTree": "03589d94ffba9b3ee79a97dcb71100ed7e0f92c3",
+    "fullOwnedStackLinuxVerified": false,
+    "productionApproval": false
   }
 }

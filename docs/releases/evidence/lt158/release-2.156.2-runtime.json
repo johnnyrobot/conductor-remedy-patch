@@ -1,0 +1,49 @@
+{
+  "synthetic": true,
+  "compiledShippingEntrypoint": true,
+  "platform": "linux/amd64",
+  "fullOwnedStackLinuxVerified": false,
+  "productionReady": false,
+  "phases": [
+    {
+      "phase": "off",
+      "node": "v22.22.3",
+      "compiledEntrypoint": true,
+      "production": true,
+      "synthetic": true,
+      "realSessionAndMongo": true,
+      "defaultOffWithoutOptionalCollections": true
+    },
+    {
+      "phase": "enabled",
+      "node": "v22.22.3",
+      "compiledEntrypoint": true,
+      "production": true,
+      "synthetic": true,
+      "realSessionAndMongo": true,
+      "authBoundaries": true,
+      "nativeSignedProducerVerified": true,
+      "writeAheadObservedByFixture": true,
+      "oneWriteAndReplayDenied": true,
+      "unknownHeldForRecovery": true,
+      "humanVerifiedCriteria": 0
+    },
+    {
+      "phase": "recover",
+      "node": "v22.22.3",
+      "compiledEntrypoint": true,
+      "production": true,
+      "synthetic": true,
+      "realSessionAndMongo": true,
+      "signerDisabledRecovery": true,
+      "explicitRoleRequired": true,
+      "modeledDurableResolvedConsumed": true,
+      "commitAndExportVerified": true,
+      "writeRetries": 0,
+      "humanVerifiedCriteria": 0
+    }
+  ],
+  "internalNetwork": true,
+  "mongoImage": "mongo:7.0.14@sha256:0032d2ca20db5fa34926f196c8a43b74e34ed239a7f2453ff1505b6f12ba8ea6",
+  "passed": true
+}

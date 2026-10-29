@@ -1,0 +1,223 @@
+{
+  "target": "staging-67301b35",
+  "baseCommit": "67301b35c3784ed73ba1a65011ef5a1d689abca1",
+  "expectedTree": "03589d94ffba9b3ee79a97dcb71100ed7e0f92c3",
+  "manifestSHA256": "3443e34338ef53f877f94eebde56da9ecbf0d37c4604d02a77204ed95b9f7a31",
+  "deploymentReady": false,
+  "deliveryCommit": "cde05316bb0e8cfaf8049c40c404e3de03c21cc1",
+  "appliedCommit": "8a1d42a55b1d26bd305d8ab1d4b8d1fe03158ffd",
+  "appliedTree": "03589d94ffba9b3ee79a97dcb71100ed7e0f92c3",
+  "typecheck": {
+    "matches": true,
+    "standalonePass": false,
+    "baselineStatus": 2,
+    "patchedStatus": 2,
+    "baselineDiagnostics": 60,
+    "patchedDiagnostics": 60,
+    "baselineNormalizedSHA256": "f5d5c09e430c82cb3b137b29b374066779f37839eb503f1dbcd39dd3e081396a",
+    "patchedNormalizedSHA256": "f5d5c09e430c82cb3b137b29b374066779f37839eb503f1dbcd39dd3e081396a"
+  },
+  "image": {
+    "tag": "johnnyrobot/conductor-remedy-candidate:staging-67301b35-03589d94ffba",
+    "id": "sha256:aecd988b06ae097684cf1f71b8fdf1d59a86475da963f373cba5ec922a5d37bc",
+    "architecture": "amd64",
+    "os": "linux",
+    "user": "",
+    "entrypoint": [
+      "node",
+      "dist/server.js"
+    ],
+    "archive": "conductor-candidate-staging-67301b35.tar.gz",
+    "archiveSHA256": "8c0b54869437146deac4fabd47b2ceb4e154f5a68c6dad13794ec88d3b941b07"
+  },
+  "runtime": {
+    "synthetic": true,
+    "compiledShippingEntrypoint": true,
+    "platform": "linux/amd64",
+    "fullOwnedStackLinuxVerified": false,
+    "productionReady": false,
+    "phases": [
+      {
+        "phase": "off",
+        "node": "v22.22.3",
+        "compiledEntrypoint": true,
+        "production": true,
+        "synthetic": true,
+        "realSessionAndMongo": true,
+        "defaultOffWithoutOptionalCollections": true
+      },
+      {
+        "phase": "enabled",
+        "node": "v22.22.3",
+        "compiledEntrypoint": true,
+        "production": true,
+        "synthetic": true,
+        "realSessionAndMongo": true,
+        "authBoundaries": true,
+        "nativeSignedProducerVerified": true,
+        "writeAheadObservedByFixture": true,
+        "oneWriteAndReplayDenied": true,
+        "unknownHeldForRecovery": true,
+        "humanVerifiedCriteria": 0
+      },
+      {
+        "phase": "recover",
+        "node": "v22.22.3",
+        "compiledEntrypoint": true,
+        "production": true,
+        "synthetic": true,
+        "realSessionAndMongo": true,
+        "signerDisabledRecovery": true,
+        "explicitRoleRequired": true,
+        "modeledDurableResolvedConsumed": true,
+        "commitAndExportVerified": true,
+        "writeRetries": 0,
+        "humanVerifiedCriteria": 0
+      }
+    ],
+    "internalNetwork": true,
+    "mongoImage": "mongo:7.0.14@sha256:0032d2ca20db5fa34926f196c8a43b74e34ed239a7f2453ff1505b6f12ba8ea6",
+    "passed": true
+  },
+  "passed": true,
+  "checks": [
+    {
+      "label": "docker-daemon",
+      "status": 0,
+      "signal": null,
+      "log": "01-docker-daemon.log"
+    },
+    {
+      "label": "clone-control",
+      "status": 0,
+      "signal": null,
+      "log": "02-clone-control.log"
+    },
+    {
+      "label": "pin-control",
+      "status": 0,
+      "signal": null,
+      "log": "03-pin-control.log"
+    },
+    {
+      "label": "clone-patched",
+      "status": 0,
+      "signal": null,
+      "log": "04-clone-patched.log"
+    },
+    {
+      "label": "pin-patched",
+      "status": 0,
+      "signal": null,
+      "log": "05-pin-patched.log"
+    },
+    {
+      "label": "committer-name",
+      "status": 0,
+      "signal": null,
+      "log": "06-committer-name.log"
+    },
+    {
+      "label": "committer-email",
+      "status": 0,
+      "signal": null,
+      "log": "07-committer-email.log"
+    },
+    {
+      "label": "apply-series",
+      "status": 0,
+      "signal": null,
+      "log": "08-apply-series.log"
+    },
+    {
+      "label": "control-server-ci",
+      "status": 0,
+      "signal": null,
+      "log": "09-control-server-ci.log"
+    },
+    {
+      "label": "control-client-ci",
+      "status": 0,
+      "signal": null,
+      "log": "10-control-client-ci.log"
+    },
+    {
+      "label": "patched-server-ci",
+      "status": 0,
+      "signal": null,
+      "log": "11-patched-server-ci.log"
+    },
+    {
+      "label": "patched-client-ci",
+      "status": 0,
+      "signal": null,
+      "log": "12-patched-client-ci.log"
+    },
+    {
+      "label": "baseline-typecheck",
+      "status": 2,
+      "signal": null,
+      "log": "13-baseline-typecheck.log"
+    },
+    {
+      "label": "patched-typecheck",
+      "status": 2,
+      "signal": null,
+      "log": "14-patched-typecheck.log"
+    },
+    {
+      "label": "server-tests",
+      "status": 0,
+      "signal": null,
+      "log": "15-server-tests.log"
+    },
+    {
+      "label": "authenticated-routes",
+      "status": 0,
+      "signal": null,
+      "log": "16-authenticated-routes.log"
+    },
+    {
+      "label": "server-build",
+      "status": 0,
+      "signal": null,
+      "log": "17-server-build.log"
+    },
+    {
+      "label": "client-tests",
+      "status": 0,
+      "signal": null,
+      "log": "18-client-tests.log"
+    },
+    {
+      "label": "client-build",
+      "status": 0,
+      "signal": null,
+      "log": "19-client-build.log"
+    },
+    {
+      "label": "actual-dockerfile",
+      "status": 0,
+      "signal": null,
+      "log": "20-actual-dockerfile.log"
+    },
+    {
+      "label": "compiled-production-runtime",
+      "status": 0,
+      "signal": null,
+      "log": "21-compiled-production-runtime.log"
+    },
+    {
+      "label": "save-candidate",
+      "status": 0,
+      "signal": null,
+      "log": "22-save-candidate.log"
+    },
+    {
+      "label": "compress-candidate",
+      "status": 0,
+      "signal": null,
+      "log": "23-compress-candidate.log"
+    }
+  ]
+}
