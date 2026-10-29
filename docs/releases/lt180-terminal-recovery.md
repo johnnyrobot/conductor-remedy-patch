@@ -41,7 +41,7 @@ timing. This receipt neither authorizes writes nor certifies production readines
 
 ## Component evidence
 
-Both original 28-patch series remain byte-identical, with additive patches29–30.
+Both original 28-patch series remain byte-identical, with additive patches29–31.
 Fresh detached reconstruction receipts and the actual owned-service report are
 in `evidence/lt180/`. Exact final Linux/image/review/merge receipts belong in the
 pull request and issue; historical image reports are not current proof.
@@ -51,8 +51,8 @@ Mongo8.0.5; Linux CI performs fresh installs and uses pinned Mongo7.0.14.
 
 | Target | Server unit | Client unit | Real router/JWT/Session/Mongo |
 |---|---:|---:|---:|
-| staging `67301b35` | 79 | 299 | 94 |
-| v2.156.2 `352a657e` | 49 | 206 | 94 |
+| staging `67301b35` | 80 | 299 | 94 |
+| v2.156.2 `352a657e` | 50 | 206 | 94 |
 
 Client/server builds pass; standalone server tsc still retains60 inherited
 diagnostics and must match the unpatched control under the strict comparator.

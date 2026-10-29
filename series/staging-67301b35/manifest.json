@@ -4,9 +4,9 @@
   "role": "primary",
   "upstreamRepository": "https://github.com/LibreTexts/conductor.git",
   "baseCommit": "67301b35c3784ed73ba1a65011ef5a1d689abca1",
-  "expectedTree": "21dc9f021c64afeea6f507e9595d83581062a77a",
+  "expectedTree": "030788418ec984471879aa5cc9586d1149da018e",
   "upstreamPackageVersion": "2.156.2",
-  "sourceCommit": "128a8698d152acaa52160d961bf65abdb8065b6e",
+  "sourceCommit": "71a471bf15dc18ef69ce4a0ce5ad15811499b332",
   "patches": [
     {
       "path": "patches/0001-feat-a11y-carry-CXone-pageID-on-review-sections-extr.patch",
@@ -127,6 +127,10 @@
     {
       "path": "patches/0030-fix-a11y-recheck-resolver-authority-at-terminal-proo.patch",
       "sha256": "2067c50e87db2e0196022afdde54a3da1e5a64657e5e481a90582d577dcf10bf"
+    },
+    {
+      "path": "patches/0031-fix-a11y-match-the-producer-opaque-trust-epoch-exact.patch",
+      "sha256": "434053f0973515976290ec1f64e05e6bd1839e1543fd53788ff2ec5eeda5b941"
     }
   ],
   "upstreamScripts": {
