@@ -50,8 +50,8 @@ migration, destructive rollback or automatic repair is authorized.
 
 | Target | Server unit | Client unit | Real auth/router/Mongo | Builds |
 |---|---:|---:|---:|---|
-| Staging | 61 pass | 291 pass | 59 pass | Server/client pass |
-| Released floor | 31 pass | 198 pass | 59 pass | Server/client pass |
+| Staging | 61 pass | 293 pass | 59 pass | Server/client pass |
+| Released floor | 31 pass | 200 pass | 59 pass | Server/client pass |
 
 Node22.20.0/npm10.9.3, isolated loopback Mongo7.0.14 standalone, unchanged
 matching target lockfile dependencies. Standalone server typecheck still fails
@@ -64,8 +64,12 @@ assertions through actual authenticated Mongo routes; the unit seam retains
 pre-storage denial checks. No passing assertion was silently dropped.
 
 Fresh original21-patch application plus the staged delta matches both tested
-source trees. Final22-patch application/tool checks, three-axis review and the
-single CodeRabbit/fallback outcome will be recorded in the PR. The one approved
+source trees. Both final22-patch applications verify the manifests and delivery-tool6/6 tests
+pass. First native Standards/Spec/Correctness review found no critical/major
+defects. Two minors (duplicate-ID pagination and mounted continuation coverage)
+are fixed; four broader upstream API/frontend convention migrations are tracked
+in LT-167. The scoped second review and single CodeRabbit/fallback outcome are
+recorded in the PR. The one approved
 actual-service signed TestSprite A plus existing C pair is pending; no paid B
 retry or weak-assertion certification is authorized.
 

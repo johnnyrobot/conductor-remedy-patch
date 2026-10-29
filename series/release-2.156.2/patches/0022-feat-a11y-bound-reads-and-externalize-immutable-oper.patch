@@ -1,32 +1,31 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: johnnyrobot <174211481+johnnyrobot@users.noreply.github.com>
-Date: Thu, 29 Oct 2026 08:19:25 -0700
+Date: Thu, 29 Oct 2026 08:38:27 -0700
 Subject: [PATCH] feat(a11y): bound reads and externalize immutable operation
  history (LT-157)
 
-Stream selection metadata and complete exports; keep active pending pointers bounded with journaled write-ahead events and CAS. Preserve legacy history without migration, add explicit work-item event budgets and mounted pagination/detail flows.
 ---
- .../projects/ConformanceBounds.test.tsx       |  30 +++
+ .../projects/ConformanceBounds.test.tsx       |  56 +++++
  .../projects/ConformanceReview.test.tsx       |   8 +-
  .../components/projects/ConformanceReview.tsx |  35 +++-
  .../ProjectAccessibility.capability.test.jsx  |   5 +-
  .../projects/RemediationWorkQueue.tsx         |  30 ++-
- .../projects/WorkQueueBounds.test.tsx         |  25 +++
- docs/remedy-storage-and-reads.md              | 149 ++++++++++++++
- server/api/conformance.ts                     |  87 ++++++--
+ .../projects/WorkQueueBounds.test.tsx         |  43 ++++
+ docs/remedy-storage-and-reads.md              | 151 +++++++++++++
+ server/api/conformance.ts                     |  83 ++++++--
  server/api/remediationactions.ts              |  75 +++++--
- server/api/remediationqueue.ts                |  69 ++++++-
- server/integration/remedy-routes.test.ts      | 194 +++++++++++++++++-
+ server/api/remediationqueue.ts                |  70 ++++++-
+ server/integration/remedy-routes.test.ts      | 198 +++++++++++++++++-
  .../scripts/inspectLegacyRemedyOperations.ts  |  18 ++
  server/util/conformance-api.test.ts           |  36 +---
- server/util/conformanceReads.ts               |  80 ++++++++
+ server/util/conformanceReads.ts               |  83 ++++++++
  server/util/remediationactions.test.ts        |   1 +
  server/util/remediationqueue.test.ts          |   2 +-
  server/util/remediationqueue.ts               |   5 +-
  server/util/remedyBudgets.ts                  |  15 ++
  server/util/remedyExports.ts                  |  17 ++
  server/util/remedyOperationRecords.ts         |  32 +++
- 20 files changed, 814 insertions(+), 99 deletions(-)
+ 20 files changed, 864 insertions(+), 99 deletions(-)
  create mode 100644 client/src/components/projects/ConformanceBounds.test.tsx
  create mode 100644 client/src/components/projects/WorkQueueBounds.test.tsx
  create mode 100644 docs/remedy-storage-and-reads.md
@@ -38,10 +37,10 @@ Stream selection metadata and complete exports; keep active pending pointers bou
 
 diff --git a/client/src/components/projects/ConformanceBounds.test.tsx b/client/src/components/projects/ConformanceBounds.test.tsx
 new file mode 100644
-index 00000000..fc709796
+index 00000000..00772fcb
 --- /dev/null
 +++ b/client/src/components/projects/ConformanceBounds.test.tsx
-@@ -0,0 +1,30 @@
+@@ -0,0 +1,56 @@
 +import React from 'react';
 +import {render,screen,fireEvent,waitFor,cleanup} from '@testing-library/react';
 +import {test,expect,vi,afterEach} from 'vitest';
@@ -71,6 +70,32 @@ index 00000000..fc709796
 + await screen.findByText(/Earlier immutable reviewer evidence/);
 + await waitFor(()=>expect(paths.filter(p=>p.includes('/history'))).toHaveLength(1));
 + expect(paths.find(p=>p.includes('/history'))).toContain('sectionID=page1&criterionID=1.1.1');
++});
++
++test('page continuation preserves selection and scan-all walks every batch from the first page',async()=>{
++ const actions:string[]=[],paths:string[]=[];
++ const criterion={id:'1.1.1',title:'Non-text Content',status:'unreviewed',checklist:['Compare images']};
++ const pages=Array.from({length:3},(_,i)=>({sectionID:`page${i+1}`,title:`Article ${i+1}`,url:'https://fixture.invalid/',fingerprint:`fp${i+1}`,blockers:[],criteria:[{id:'1.1.1',status:'unreviewed'}]}));
++ vi.stubGlobal('fetch',vi.fn(async(url:any,init:any)=>{
++  const path=String(url);paths.push(path);let body:any;
++  if(init?.method==='POST'){actions.push(path);body={wcag_review:{rendered:{state:'complete'}}};}
++  else if(path.includes('/criteria/'))body={criterion};
++  else if(path.includes('/pages/'))body={page:pages.find(p=>path.endsWith('/'+p.sectionID))};
++  else body={canEdit:true,criteria:[criterion],nextCursor:path.includes('?cursor=pages-next')?null:'pages-next',report:{scope:{version:'scope1'},pages:path.includes('?cursor=pages-next')?pages.slice(2):pages.slice(0,2),digest:'digest',verificationPercent:0,verifiedCriteria:0,totalCriteria:150,status:'verification_pending',readyForSignoff:false}};
++  return {ok:true,json:async()=>({err:false,...body})};
++ }));
++ render(<ConformanceReview projectID="bounded" sections={[]}/>);
++ fireEvent.change(await screen.findByLabelText('Page to evaluate'),{target:{value:'page1'}});
++ await screen.findByLabelText('Compare images');
++ await waitFor(()=>expect(screen.getByRole('button',{name:'Next 100 pages'})).toBeEnabled());
++ fireEvent.click(screen.getByRole('button',{name:'Next 100 pages'}));
++ await screen.findByRole('option',{name:/Article 3/});expect(screen.getByLabelText('Page to evaluate')).toHaveValue('page1');
++ fireEvent.change(screen.getByLabelText('Page to evaluate'),{target:{value:'page3'}});await screen.findByLabelText('Compare images');
++ fireEvent.click(screen.getByRole('button',{name:'Scan all rendered pages'}));
++ await screen.findByText(/3 rendered pages scanned; 0 require scan follow-up/);
++ expect(actions.map(p=>p.split('/').at(-2))).toEqual(['page1','page2','page3']);
++ expect(paths.filter(p=>p.includes('?cursor=pages-next')).length).toBe(2);
++ expect(screen.getByLabelText('Page to evaluate')).toHaveValue('page3');
 +});
 diff --git a/client/src/components/projects/ConformanceReview.test.tsx b/client/src/components/projects/ConformanceReview.test.tsx
 index ba77d917..884a3b09 100644
@@ -113,7 +138,7 @@ index ba77d917..884a3b09 100644
  
  
 diff --git a/client/src/components/projects/ConformanceReview.tsx b/client/src/components/projects/ConformanceReview.tsx
-index a6eb4392..15920bfa 100644
+index a6eb4392..e3e76de5 100644
 --- a/client/src/components/projects/ConformanceReview.tsx
 +++ b/client/src/components/projects/ConformanceReview.tsx
 @@ -41,14 +41,30 @@ function HandoffSignoff({handoff,canEdit,save,busy}:any) {
@@ -157,8 +182,8 @@ index a6eb4392..15920bfa 100644
          </form>}
        </details>
 -      <label>Page to evaluate<select value={sectionID} onChange={e=>setSectionID(e.target.value)}><option value="">Select a page</option>{report.pages.map((p:any)=><option key={p.sectionID} value={p.sectionID}>{p.title} ({p.blockers.length?'scan blockers':p.criteria.filter((c:any)=>['pass','not_applicable'].includes(c.status)).length+'/50 reviewed'})</option>)}</select></label>
-+      <label>Page to evaluate<select value={sectionID} onChange={e=>{if(e.target.value!==sectionID){setDetail(null);setSelectedCriterion(null);setSectionID(e.target.value);}}}><option value="">Select a page</option>{report.pages.map((p:any)=><option key={p.sectionID} value={p.sectionID}>{p.title} ({p.blockers.length?'scan blockers':p.criteria.filter((c:any)=>['pass','not_applicable'].includes(c.status)).length+'/50 reviewed'})</option>)}</select></label>
-+      {data.nextCursor && <button className="ui button" disabled={busy||detailBusy} onClick={()=>{setSectionID('');load(data.nextCursor).catch(e=>setError(e.message));}}>Next 100 pages</button>}
++      <label>Page to evaluate<select value={sectionID} onChange={e=>{if(e.target.value!==sectionID){setDetail(null);setSelectedCriterion(null);setSectionID(e.target.value);}}}><option value="">Select a page</option>{report.pages.map((p:any,index:number)=><option key={`${p.sectionID}-${index}`} value={p.sectionID}>{p.title} ({p.blockers.length?'scan blockers':p.criteria.filter((c:any)=>['pass','not_applicable'].includes(c.status)).length+'/50 reviewed'})</option>)}{page&&!report.pages.some((p:any)=>p.sectionID===page.sectionID)&&<option value={page.sectionID}>{page.title} (selected)</option>}</select></label>
++      {data.nextCursor && <button className="ui button" disabled={busy||detailBusy} onClick={()=>load(data.nextCursor).catch(e=>setError(e.message))}>Next 100 pages</button>}
        {data.canEdit && <><button className="ui primary button" disabled={busy || !page} onClick={()=>scan()}>Scan rendered page</button><button className="ui button" disabled={busy || !report.pages.length} onClick={()=>scan(true)}>Scan all rendered pages</button>{busy && <button className="ui button" onClick={()=>{stop.current=true;}}>Stop after current page</button>}</>}
        {page && <><p><a href={page.url} target="_blank" rel="noreferrer">Open full reader page</a></p>
          {page.blockers.length>0 && <ul>{page.blockers.map((b:string)=><li key={b}>{b}</li>)}</ul>}
@@ -279,10 +304,10 @@ index b436001c..53ccd0ef 100644
    </section>;
 diff --git a/client/src/components/projects/WorkQueueBounds.test.tsx b/client/src/components/projects/WorkQueueBounds.test.tsx
 new file mode 100644
-index 00000000..dc4989c6
+index 00000000..585cd446
 --- /dev/null
 +++ b/client/src/components/projects/WorkQueueBounds.test.tsx
-@@ -0,0 +1,25 @@
+@@ -0,0 +1,43 @@
 +import React from 'react';
 +import {render,screen,fireEvent,waitFor,cleanup} from '@testing-library/react';
 +import {test,expect,vi,afterEach} from 'vitest';
@@ -308,12 +333,30 @@ index 00000000..dc4989c6
 + await waitFor(()=>expect(paths.filter(p=>p.includes('/history?'))).toHaveLength(1));
 + expect(notes).toEqual(['Durable reviewer note survives a new scan.']);
 +});
++
++test('mounted work-item and history continuation requests the next cursor without accumulating every page',async()=>{
++ const paths:string[]=[];
++ const item=(id:string)=>({_id:id,key:id,sectionID:'section1',sectionTitle:'Synthetic article',title:id==='item1'?'First item':'Later item',status:'todo',priority:'normal',assignee:'',version:0});
++ vi.stubGlobal('fetch',vi.fn(async(url:any)=>{
++  const path=String(url);paths.push(path);
++  const body=path.includes('/history?')?{records:[{historyID:path.includes('cursor=history-next')?'event2':'event1',note:path.includes('cursor=history-next')?'Second history batch':'First history batch',at:new Date().toISOString(),actor:'reviewer',status:'todo'}],nextCursor:path.includes('cursor=history-next')?null:'history-next'}
++   :{items:[item(path.includes('cursor=items-next')?'item2':'item1')],users:[],sections:[],candidates:[],canEdit:true,nextCursor:path.includes('cursor=items-next')?null:'items-next'};
++  return {ok:true,json:async()=>({err:false,...body})};
++ }));
++ render(<RemediationWorkQueue projectID="synthetic"/>);
++ await screen.findByText(/First item/);fireEvent.click(screen.getByRole('button',{name:'Next 100 work items'}));
++ await screen.findByText(/Later item/);expect(screen.queryByText(/First item/)).toBeNull();
++ fireEvent.click(screen.getByText('History'));await screen.findByText('First history batch');
++ fireEvent.click(screen.getByRole('button',{name:'Next 100 records'}));await screen.findByText('Second history batch');
++ expect(screen.queryByText('First history batch')).toBeNull();
++ expect(paths.some(p=>p.endsWith('/item2/history?kind=history&cursor=history-next'))).toBe(true);
++});
 diff --git a/docs/remedy-storage-and-reads.md b/docs/remedy-storage-and-reads.md
 new file mode 100644
-index 00000000..64abfa16
+index 00000000..14f34e00
 --- /dev/null
 +++ b/docs/remedy-storage-and-reads.md
-@@ -0,0 +1,149 @@
+@@ -0,0 +1,151 @@
 +# Bounded Remedy reads and immutable operation events (LT-157)
 +
 +This is a development delivery candidate. Production writes remain on hold.
@@ -325,7 +368,9 @@ index 00000000..64abfa16
 +
 +All routes use existing verified-session, current project/organization policy and
 +feature opt-in. Limits default to100 and reject values outside1–200. Cursors are
-+opaque continuations bound to the project and selected identity. Object IDs
++opaque continuations bound to the project and selected identity. Metadata lists
++include a version and original-position tie-breaker, so duplicate legacy section
++IDs cannot disappear at a batch boundary; changed identities require a refresh. Object IDs
 +provide deterministic history order; conformance selection separately retains
 +createdAt descending then _id descending, regardless of review `at`.
 +
@@ -464,13 +509,13 @@ index 00000000..64abfa16
 +delete history or unlock/retry merely to make an older runtime appear healthy.
 +No production migration, deployment or credential provisioning is authorized here.
 diff --git a/server/api/conformance.ts b/server/api/conformance.ts
-index 0971ea5d..3bcb8140 100644
+index 0971ea5d..124ec822 100644
 --- a/server/api/conformance.ts
 +++ b/server/api/conformance.ts
-@@ -1,32 +1,81 @@
+@@ -1,32 +1,77 @@
 +import { BSON } from 'mongodb';
 +import { beginRemedyExport } from '../util/remedyExports.js';
-+import { READ_TIMEOUT_MS, compactPage, encodeCursor, loadConformance, pagination, recordSnapshot } from '../util/conformanceReads.js';
++import { READ_TIMEOUT_MS, compactPage, encodeCursor, loadConformance, paginateValues, pagination, recordSnapshot } from '../util/conformanceReads.js';
  import { remediationHandoff, validateRemediationHandoff } from '../util/remediationHandoff.js';
  import mongoose from 'mongoose';
  import { randomUUID } from 'node:crypto';
@@ -498,14 +543,10 @@ index 0971ea5d..3bcb8140 100644
 -    try {const {report}=await load(req.queueProject);res.json({err:false,canEdit:req.queueCanEdit,criteria,report});}
 -    catch {res.status(500).json({err:true,errMsg:'Unable to load conformance evidence.'});}
 +    try {
-+      const {limit,cursor}=pagination(req.query);
-+      if(cursor&&(cursor.projectID!==req.params.projectID||typeof cursor.after!=='string'||cursor.kind!=='pages')) throw Object.assign(Error('Invalid page cursor.'),{status:400});
 +      const {report}=await load(req.queueProject);
-+      const pages=[...report.pages].sort((a:any,b:any)=>a.sectionID.localeCompare(b.sectionID)).filter((p:any)=>!cursor||p.sectionID>cursor.after);
-+      const selected=pages.slice(0,limit);
++      const page=paginateValues(report.pages,req.query,{kind:'pages',projectID:req.params.projectID},p=>JSON.stringify([p.sectionID,p.fingerprint]));
 +      res.setHeader('Cache-Control','no-store');
-+      res.json({err:false,canEdit:req.queueCanEdit,criteria,report:{...report,pages:selected.map(compactPage)},
-+        nextCursor:pages.length>limit?encodeCursor({kind:'pages',projectID:req.params.projectID,after:selected.at(-1).sectionID}):null});
++      res.json({err:false,canEdit:req.queueCanEdit,criteria,report:{...report,pages:page.entries.map(compactPage)},nextCursor:page.nextCursor});
 +    } catch(error) {fail(res,error,'Unable to load conformance evidence.');}
 +  });
 +  router.get(`${base}/conformance/pages/:evidenceSectionID`,...access,async(req:any,res:any)=>{
@@ -566,7 +607,7 @@ index 0971ea5d..3bcb8140 100644
    });
    router.post(`${base}/conformance/:action`,...access,async(req:any,res:any)=>{
      try {
-@@ -47,7 +96,9 @@ export function registerConformance(router:any,{base,access,Records}:any) {
+@@ -47,7 +92,9 @@ export function registerConformance(router:any,{base,access,Records}:any) {
          if(body.confirmed!==true || typeof body.statement!=='string' || body.statement.trim().length<40 || body.statement.length>4000) throw Error('Provide and confirm a reviewer conformance statement (40–4,000 characters).');
          data={digest:report.digest,scopeVersion:scope.version,statement:body.statement.trim()};
        } else throw Error('Unknown conformance action.');
@@ -578,7 +619,7 @@ index 0971ea5d..3bcb8140 100644
      } catch(e:any) {res.status(400).json({err:true,errMsg:e.message || 'Unable to save conformance evidence.'});}
    });
 diff --git a/server/api/remediationactions.ts b/server/api/remediationactions.ts
-index 630a1908..28959e40 100644
+index 630a1908..ff581020 100644
 --- a/server/api/remediationactions.ts
 +++ b/server/api/remediationactions.ts
 @@ -1,17 +1,57 @@
@@ -630,7 +671,7 @@ index 630a1908..28959e40 100644
 +        if(legacy.length>offset+available)nextCursor=encodeCursor({...binding,phase:'legacy',upper:String(upper),offset:offset+available});
 +      }
 +      res.setHeader('Cache-Control','no-store');res.json({err:false,records:selected,nextCursor});
-+    }catch(error:any){res.status(error.status||500).json({err:true,errMsg:error.publicMessage||error.message||'Unable to read operation history.'});}
++    }catch(error:any){res.status(error.status||500).json({err:true,errMsg:error.publicMessage||([400,413].includes(error.status)?error.message:'Unable to read operation history.')});}
 +  });
    router.get(`${base}/page/:sectionID/operations/:localID`, ...access, async (req: any, res: any) => {
      try {
@@ -723,10 +764,11 @@ index 630a1908..28959e40 100644
        return res.json({ err: false, ...(isWrite ? safeOperationMetadata(outcome!.metadata) : result),
          localOperationID: intent?.localID, page_url: section.sectionURL,
 diff --git a/server/api/remediationqueue.ts b/server/api/remediationqueue.ts
-index 4e99340d..73c72094 100644
+index 4e99340d..5aa770cf 100644
 --- a/server/api/remediationqueue.ts
 +++ b/server/api/remediationqueue.ts
-@@ -1,3 +1,7 @@
+@@ -1,3 +1,8 @@
++import { pageFingerprint } from '../util/conformance.js';
 +import { beginRemedyExport } from '../util/remedyExports.js';
 +import { encodeCursor, paginateValues, pagination, READ_TIMEOUT_MS } from '../util/conformanceReads.js';
 +import { workItemAppendBudget, requireEventBudget } from '../util/remedyBudgets.js';
@@ -734,7 +776,7 @@ index 4e99340d..73c72094 100644
  import { requireRemedyConfiguration } from '../util/remedyConfig.js';
  import { registerConformance, conformanceRecords } from './conformance.js';
  import mongoose from 'mongoose';
-@@ -23,7 +27,7 @@ export async function ensureRemedyStorage() {
+@@ -23,7 +28,7 @@ export async function ensureRemedyStorage() {
    requireRemedyConfiguration();
    if (!storageReady) {
      storageReady = (async () => {
@@ -743,7 +785,7 @@ index 4e99340d..73c72094 100644
          await model.createCollection();
          await model.createIndexes();
        }
-@@ -36,7 +40,7 @@ export async function ensureRemedyStorage() {
+@@ -36,7 +41,7 @@ export async function ensureRemedyStorage() {
  }
  
  /** Dependencies are injected so this module also layers onto the existing deployed bundle. */
@@ -752,7 +794,7 @@ index 4e99340d..73c72094 100644
    const base = '/project/:projectID/accessibility/workqueue';
    const authorize = async (req: any, res: any, next: any) => {
      try {
-@@ -57,15 +61,56 @@ export function registerRemediationQueue(router: any, { auth, projects, Project,
+@@ -57,15 +62,56 @@ export function registerRemediationQueue(router: any, { auth, projects, Project,
    };
    const access = [auth.verifyRequest, auth.getUserAttributes, authorize];
    registerConformance(router, { base, access });
@@ -770,7 +812,7 @@ index 4e99340d..73c72094 100644
 -    } catch { res.status(500).json({ err: true, errMsg: 'Unable to load the work queue.' }); }
 +      const found = await WorkItems.find({projectID:req.params.projectID,...(cursor?{_id:{$lt:new mongoose.Types.ObjectId(cursor.after)}}:{})}).sort({_id:-1}).select('-history -scanEvidence').limit(limit+1).maxTimeMS(READ_TIMEOUT_MS).lean();
 +      const items=found.slice(0,limit);
-+      const sectionPage=paginateValues(sections,{limit:req.query.limit,cursor:req.query.sectionCursor},{kind:'queue-pages',projectID:req.params.projectID},s=>String(s._id));
++      const sectionPage=paginateValues(sections,{limit:req.query.limit,cursor:req.query.sectionCursor},{kind:'queue-pages',projectID:req.params.projectID},s=>JSON.stringify([String(s._id),pageFingerprint(s)]));
 +      const candidatePage=paginateValues(selected?queueCandidates(selected):[],{limit:req.query.limit,cursor:req.query.candidateCursor},{kind:'queue-candidates',projectID:req.params.projectID,sectionID:String(selected?._id||'')},c=>c.key);
 +      const queued=await WorkItems.find({projectID:req.params.projectID,key:{$in:candidatePage.entries.map(c=>c.key)}}).select('key').limit(200).maxTimeMS(READ_TIMEOUT_MS).lean();
 +      const keys=new Set(queued.map((item:any)=>item.key));
@@ -813,7 +855,7 @@ index 4e99340d..73c72094 100644
    });
    router.post(base, ...access, async (req: any, res: any) => {
      try {
-@@ -75,6 +120,7 @@ export function registerRemediationQueue(router: any, { auth, projects, Project,
+@@ -75,6 +121,7 @@ export function registerRemediationQueue(router: any, { auth, projects, Project,
        const candidates = queueCandidates(section), chosen = candidates.filter(x => keys.includes(x.key));
        if (chosen.length !== new Set(keys).size) return res.status(409).json({ err: true, errMsg: 'Review changed. Refresh the available findings.' });
        const actor = req.user.decoded.uuid;
@@ -821,7 +863,7 @@ index 4e99340d..73c72094 100644
        const result = await WorkItems.bulkWrite(chosen.map(item => ({ updateOne: {
          filter: { projectID: req.params.projectID, key: item.key },
          update: { $setOnInsert: { ...item, projectID: req.params.projectID, status: 'todo', priority: 'normal', assignee: '', version: 0, createdBy: actor,
-@@ -83,7 +129,7 @@ export function registerRemediationQueue(router: any, { auth, projects, Project,
+@@ -83,7 +130,7 @@ export function registerRemediationQueue(router: any, { auth, projects, Project,
        res.json({ err: false, created: result.upsertedCount });
      } catch (e: any) {
        if (e.code === 11000) return res.json({ err: false, created: 0 });
@@ -830,7 +872,7 @@ index 4e99340d..73c72094 100644
      }
    });
    router.patch(`${base}/:itemID`, ...access, async (req: any, res: any) => {
-@@ -95,12 +141,13 @@ export function registerRemediationQueue(router: any, { auth, projects, Project,
+@@ -95,12 +142,13 @@ export function registerRemediationQueue(router: any, { auth, projects, Project,
      try {
        const actor = req.user.decoded.uuid, at = new Date();
        const { note, ...fields } = changes;
@@ -849,7 +891,7 @@ index 4e99340d..73c72094 100644
    });
  }
 diff --git a/server/integration/remedy-routes.test.ts b/server/integration/remedy-routes.test.ts
-index 72e60408..a55de1b2 100644
+index 72e60408..6c6da122 100644
 --- a/server/integration/remedy-routes.test.ts
 +++ b/server/integration/remedy-routes.test.ts
 @@ -46,7 +46,10 @@ let tocURL = page, tocPageID = '123', tocTitle = 'Imported title';
@@ -910,7 +952,7 @@ index 72e60408..a55de1b2 100644
    previewExpiry = 0;
    const reviewed = await reviewedInput();
    for (const setting of [{ REMEDY_REVIEWER_KEY_ENABLED: 'false' }, { REMEDY_REVIEWER_KEY_NOT_AFTER: String(Math.floor(Date.now()/1000)-1) }]) {
-@@ -684,16 +690,188 @@ test('indexed projection and authenticated complete export retain ordered curren
+@@ -684,16 +690,192 @@ test('indexed projection and authenticated complete export retain ordered curren
   if(oldReview) await Records.deleteOne({_id:oldReview._id});
   const history=await Records.find({projectID,kind:'review'}).sort({createdAt:-1,_id:-1}).toArray();
   const response=await request(base+'/conformance');assert.equal(response.status,200);
@@ -948,6 +990,7 @@ index 72e60408..a55de1b2 100644
 +
 +test('summary pages and immutable criterion history are bounded with stable cursors', async()=>{
 + const sections=Array.from({length:205},(_,i)=>({_id:new mongoose.Types.ObjectId((50000+i).toString(16).padStart(24,'0')),sectionTitle:`Page ${i}`,sectionURL:page,wcagReview:scan().wcag_review}));
++ sections[100]._id=sections[99]._id; // A legacy duplicate spanning the default batch boundary.
 + await Project.updateOne({projectID},{$set:{a11yReview:sections}});
 + const summary=await request(base+'/conformance');assert.equal(summary.status,200);
 + assert.equal(summary.data.report.pages.length,100);assert.ok(summary.data.nextCursor);
@@ -955,7 +998,10 @@ index 72e60408..a55de1b2 100644
 + const next=await request(base+'/conformance?cursor='+encodeURIComponent(summary.data.nextCursor));
 + assert.equal(next.data.report.pages.length,100);
 + const last=await request(base+'/conformance?cursor='+encodeURIComponent(next.data.nextCursor));assert.equal(last.data.report.pages.length,5);assert.equal(last.data.nextCursor,null);
-+ assert.equal(new Set([...summary.data.report.pages,...next.data.report.pages,...last.data.report.pages].map(p=>p.sectionID)).size,205);
++ assert.equal([...summary.data.report.pages,...next.data.report.pages,...last.data.report.pages].filter(p=>p.sectionID===String(sections[99]._id)).length,2);
++ const queueFirst=await request(base),queueNext=await request(base+'?sectionCursor='+encodeURIComponent(queueFirst.data.nextSectionCursor)),queueLast=await request(base+'?sectionCursor='+encodeURIComponent(queueNext.data.nextSectionCursor));
++ assert.equal([...queueFirst.data.sections,...queueNext.data.sections,...queueLast.data.sections].length,205);
++ assert.equal([...queueFirst.data.sections,...queueNext.data.sections,...queueLast.data.sections].filter(p=>p.id===String(sections[99]._id)).length,2);
 + assert.equal((await request(base+'/conformance?limit=201')).status,400);
 + const Records=mongoose.connection.db!.collection('conformancerecords');
 + await Records.insertMany(Array.from({length:205},(_,i)=>({projectID,kind:'review',sectionID:String(sections[0]._id),criterionID:'1.1.1',actor:users.editor,data:{notes:`History ${i}`},createdAt:new Date(i)})));
@@ -1176,10 +1222,11 @@ index 60f32001..8b05b994 100644
  });
 diff --git a/server/util/conformanceReads.ts b/server/util/conformanceReads.ts
 new file mode 100644
-index 00000000..0896ec14
+index 00000000..b3c5fa93
 --- /dev/null
 +++ b/server/util/conformanceReads.ts
-@@ -0,0 +1,80 @@
+@@ -0,0 +1,83 @@
++import { createHash } from 'node:crypto';
 +import mongoose from 'mongoose';
 +import { conformanceReport, criteria, pageFingerprint } from './conformance.js';
 +import { remediationHandoff } from './remediationHandoff.js';
@@ -1255,10 +1302,12 @@ index 00000000..0896ec14
 +/** Stable IDs, bounded output and explicit continuation for embedded metadata. */
 +export function paginateValues(values:any[],query:any,binding:any,key:(value:any)=>string){
 + const {limit,cursor}=pagination(query);
-+ if(cursor&&(Object.entries(binding).some(([name,value])=>cursor[name]!==value)||typeof cursor.after!=='string'))throw Object.assign(Error('Invalid list cursor.'),{status:400});
-+ const sorted=[...values].sort((a,b)=>key(a)<key(b)?-1:key(a)>key(b)?1:0).filter(value=>!cursor||key(value)>cursor.after);
-+ const entries=sorted.slice(0,limit);
-+ return {entries,total:values.length,nextCursor:sorted.length>limit?encodeCursor({...binding,after:key(entries.at(-1))}):null};
++ const version=createHash('sha256').update(JSON.stringify(values.map(key))).digest('hex');
++ if(cursor&&(Object.entries(binding).some(([name,value])=>cursor[name]!==value)||cursor.version!==version||typeof cursor.after!=='string'||!Number.isInteger(cursor.index)||cursor.index<0))throw Object.assign(Error('List changed or cursor is invalid. Refresh the first page.'),{status:400});
++ const sorted=values.map((value,index)=>({value,index,key:key(value)})).sort((a,b)=>a.key<b.key?-1:a.key>b.key?1:a.index-b.index)
++   .filter(entry=>!cursor||entry.key>cursor.after||(entry.key===cursor.after&&entry.index>cursor.index));
++ const selected=sorted.slice(0,limit),last=selected.at(-1);
++ return {entries:selected.map(entry=>entry.value),total:values.length,nextCursor:sorted.length>limit?encodeCursor({...binding,version,after:last!.key,index:last!.index}):null};
 +}
 diff --git a/server/util/remediationactions.test.ts b/server/util/remediationactions.test.ts
 index 3e058bd7..aadae86e 100644

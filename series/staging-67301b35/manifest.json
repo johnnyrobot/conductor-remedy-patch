@@ -4,9 +4,9 @@
   "role": "primary",
   "upstreamRepository": "https://github.com/LibreTexts/conductor.git",
   "baseCommit": "67301b35c3784ed73ba1a65011ef5a1d689abca1",
-  "expectedTree": "ef76457706e242dade7be7d4d5dae9fb0f22e26f",
+  "expectedTree": "06fa225f313adec4bc9b6e6c4c207f596c8f719a",
   "upstreamPackageVersion": "2.156.2",
-  "sourceCommit": "bc0049bb639c08d21ce797aeb7ec84032d476689",
+  "sourceCommit": "b88a555a3c95ba8a342d0eb0e21ed2157252385a",
   "patches": [
     {
       "path": "patches/0001-feat-a11y-carry-CXone-pageID-on-review-sections-extr.patch",
@@ -94,7 +94,7 @@
     },
     {
       "path": "patches/0022-feat-a11y-bound-reads-and-externalize-immutable-oper.patch",
-      "sha256": "2c4317ed5757a0fe2ab37611e02f1a5685e3fd68065bb150cf1db72b3d549293"
+      "sha256": "50d4f290efc479de1019ac749818385cdd79fab28921d800b0454c270a030218"
     }
   ],
   "upstreamScripts": {

@@ -20,8 +20,8 @@ targets selected by the Chief, not observations of the running production versio
 
 | Target | Manifest | Resulting source tree |
 |---|---|---|
-| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `ef76457706e242dade7be7d4d5dae9fb0f22e26f` |
-| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `96e14fc333d2006d2d7f26bb611ae1ed517d2bfa` |
+| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `06fa225f313adec4bc9b6e6c4c207f596c8f719a` |
+| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `59e1b325c710b5be84c33dfb0a6e25cce1ae02ca` |
 
 Each manifest lists its own twenty-two ordered patches and SHA-256 checksums. Use
 Node 22 and a fresh **detached** clone; the command refuses a wrong base, dirty
@@ -261,8 +261,8 @@ question flows. Full release validation still covers the coordinated stack.
 
 | Target | Server unit | Client unit | Authenticated route/Mongo | Builds |
 |---|---:|---:|---:|---|
-| Staging pinned `67301b35` | 61 pass | 291 pass | 59 pass | Client/server pass |
-| Released floor `352a657e` | 31 pass | 198 pass | 59 pass | Client/server pass |
+| Staging pinned `67301b35` | 61 pass | 293 pass | 59 pass | Client/server pass |
+| Released floor `352a657e` | 31 pass | 200 pass | 59 pass | Client/server pass |
 
 The current table records LT-157 checks; LT-140 historical checks used Node 22.20.0 / npm 10.9.3 with the matching target's
 previously installed, unchanged lockfile dependencies. Both built servers reached
