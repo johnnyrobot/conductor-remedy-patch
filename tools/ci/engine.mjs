@@ -1,5 +1,6 @@
 // Synthetic internal protocol fixture, never an accessibility engine certification.
 import fs from "node:fs";
+import { fixtureDiagnostic } from "./candidate-policy.mjs";
 import https from "node:https";
 import { createHash, randomUUID, verify } from "node:crypto";
 import assert from "node:assert/strict";
@@ -230,7 +231,8 @@ const server = https.createServer(
       }
       res.statusCode = 404;
       res.end(JSON.stringify({ err: true }));
-    } catch {
+    } catch (error) {
+      console.error(fixtureDiagnostic(error, req.url));
       res.statusCode = 500;
       res.end(
         JSON.stringify({

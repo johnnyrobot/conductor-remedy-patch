@@ -18,7 +18,9 @@ jobs:
         with:
           node-version: 22.20.0
       - name: Delivery integrity and diagnostic-policy tests
-        run: node --test tools/apply-series.test.mjs tools/compare-typecheck.test.mjs tools/ci/loopback-only.test.mjs
+        run: |
+          node --test tools/apply-series.test.mjs tools/compare-typecheck.test.mjs tools/ci/loopback-only.test.mjs tools/candidate-provenance.test.mjs tools/ci/candidate-policy.test.mjs
+          python3 tools/test_candidate_archive.py
   pinned:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -57,7 +59,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: conductor-candidate-${{ matrix.target }}-${{ github.run_id }}
+          name: conductor-candidate-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/conductor-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}/output/
           if-no-files-found: error
           retention-days: 14

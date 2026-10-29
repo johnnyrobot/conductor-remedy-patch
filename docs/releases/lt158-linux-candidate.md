@@ -1,5 +1,9 @@
 # LT-158 pinned Linux candidate pipeline
 
+**Historical 24-patch execution only.** Do not select these artifacts for the
+current32-patch delivery. Use the [current index and verification instructions](lt178-current-candidates.md).
+The receipts below are preserved; later terminal-proof recovery does not rewrite this history.
+
 Both Linux matrix targets passed [run 40928445744](https://github.com/johnnyrobot/conductor-remedy-patch/actions/runs/40928445744).
 The downloaded image archives, configuration IDs, entrypoint, architecture,
 Node version, source tree/manifest binding and absence of injected runtime

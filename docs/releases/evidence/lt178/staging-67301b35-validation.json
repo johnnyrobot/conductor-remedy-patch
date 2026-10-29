@@ -1,0 +1,262 @@
+{
+  "target": "staging-67301b35",
+  "baseCommit": "67301b35c3784ed73ba1a65011ef5a1d689abca1",
+  "expectedTree": "1edf0ba1516e39731f5c3289e31045bffda311f3",
+  "manifestSHA256": "b7d84e117baa28207f81bc50b0a3b05c386dc7a89cdfb8879edfa16afaa8aafc",
+  "deploymentReady": false,
+  "deliveryCommit": "1d264023c12baabe21cd32fc1e4f8a1a7b4b328f",
+  "appliedCommit": "b96f192ab682ad4b69aa9f576df82141c50d163a",
+  "appliedTree": "1edf0ba1516e39731f5c3289e31045bffda311f3",
+  "typecheck": {
+    "matches": true,
+    "standalonePass": false,
+    "baselineStatus": 2,
+    "patchedStatus": 2,
+    "baselineDiagnostics": 60,
+    "patchedDiagnostics": 60,
+    "baselineNormalizedSHA256": "f5d5c09e430c82cb3b137b29b374066779f37839eb503f1dbcd39dd3e081396a",
+    "patchedNormalizedSHA256": "f5d5c09e430c82cb3b137b29b374066779f37839eb503f1dbcd39dd3e081396a"
+  },
+  "image": {
+    "tag": "johnnyrobot/conductor-remedy-candidate:staging-67301b35-1edf0ba1516e",
+    "id": "sha256:e2c5d63ad527afd4c577b4f820ef65fe16222356d1dec3761bbf12eb5dcf58d9",
+    "architecture": "amd64",
+    "os": "linux",
+    "user": "",
+    "entrypoint": [
+      "node",
+      "dist/server.js"
+    ],
+    "archive": "conductor-candidate-staging-67301b35.tar.gz",
+    "archiveSHA256": "fd65b40b251b9e0326e361fbe9422939702a796ce055d08fe885109fe29f99f9"
+  },
+  "runtime": {
+    "synthetic": true,
+    "compiledShippingEntrypoint": true,
+    "platform": "linux/amd64",
+    "fullOwnedStackLinuxVerified": false,
+    "productionReady": false,
+    "phases": [
+      {
+        "phase": "off",
+        "node": "v22.22.3",
+        "compiledEntrypoint": true,
+        "production": true,
+        "synthetic": true,
+        "realSessionAndMongo": true,
+        "defaultOffWithoutOptionalCollections": true
+      },
+      {
+        "phase": "enabled",
+        "node": "v22.22.3",
+        "compiledEntrypoint": true,
+        "production": true,
+        "synthetic": true,
+        "realSessionAndMongo": true,
+        "authBoundaries": true,
+        "nativeSignedProducerVerified": true,
+        "writeAheadObservedByFixture": true,
+        "oneWriteAndReplayDenied": true,
+        "unknownHeldForRecovery": true,
+        "humanVerifiedCriteria": 0
+      },
+      {
+        "phase": "recover",
+        "node": "v22.22.3",
+        "compiledEntrypoint": true,
+        "production": true,
+        "synthetic": true,
+        "realSessionAndMongo": true,
+        "signerDisabledRecovery": true,
+        "explicitRoleRequired": true,
+        "modeledDurableResolvedConsumed": true,
+        "commitAndExportVerified": true,
+        "writeRetries": 0,
+        "humanVerifiedCriteria": 0
+      },
+      {
+        "phase": "review-only",
+        "node": "v22.22.3",
+        "compiledEntrypoint": true,
+        "production": true,
+        "synthetic": true,
+        "realSessionAndMongo": true,
+        "reviewOnlyWithoutSigner": true,
+        "scanAndPreview": true,
+        "craftedWritesDenied": true,
+        "noIntentOrPreviewConsumption": true,
+        "externalMutationDelta": 0,
+        "humanVerifiedCriteria": 0
+      },
+      {
+        "phase": "terminal-write",
+        "node": "v22.22.3",
+        "compiledEntrypoint": true,
+        "production": true,
+        "synthetic": true,
+        "realSessionAndMongo": true,
+        "lostReplyBeforeID": true,
+        "terminalEpochMissingHeld": true,
+        "auditFalsePreserved": true
+      },
+      {
+        "phase": "terminal-recover",
+        "node": "v22.22.3",
+        "compiledEntrypoint": true,
+        "production": true,
+        "synthetic": true,
+        "realSessionAndMongo": true,
+        "terminalProofRecoveredWithoutSigner": true,
+        "originalHistoryPreserved": true,
+        "readOnlyLookupHeld": true,
+        "auditFalsePreserved": true,
+        "remoteMutationRetries": 0,
+        "humanVerifiedCriteria": 0
+      }
+    ],
+    "internalNetwork": true,
+    "mongoImage": "mongo:7.0.14@sha256:0032d2ca20db5fa34926f196c8a43b74e34ed239a7f2453ff1505b6f12ba8ea6",
+    "passed": true
+  },
+  "passed": true,
+  "checks": [
+    {
+      "label": "docker-daemon",
+      "status": 0,
+      "signal": null,
+      "log": "01-docker-daemon.log"
+    },
+    {
+      "label": "clone-control",
+      "status": 0,
+      "signal": null,
+      "log": "02-clone-control.log"
+    },
+    {
+      "label": "pin-control",
+      "status": 0,
+      "signal": null,
+      "log": "03-pin-control.log"
+    },
+    {
+      "label": "clone-patched",
+      "status": 0,
+      "signal": null,
+      "log": "04-clone-patched.log"
+    },
+    {
+      "label": "pin-patched",
+      "status": 0,
+      "signal": null,
+      "log": "05-pin-patched.log"
+    },
+    {
+      "label": "committer-name",
+      "status": 0,
+      "signal": null,
+      "log": "06-committer-name.log"
+    },
+    {
+      "label": "committer-email",
+      "status": 0,
+      "signal": null,
+      "log": "07-committer-email.log"
+    },
+    {
+      "label": "apply-series",
+      "status": 0,
+      "signal": null,
+      "log": "08-apply-series.log"
+    },
+    {
+      "label": "control-server-ci",
+      "status": 0,
+      "signal": null,
+      "log": "09-control-server-ci.log"
+    },
+    {
+      "label": "control-client-ci",
+      "status": 0,
+      "signal": null,
+      "log": "10-control-client-ci.log"
+    },
+    {
+      "label": "patched-server-ci",
+      "status": 0,
+      "signal": null,
+      "log": "11-patched-server-ci.log"
+    },
+    {
+      "label": "patched-client-ci",
+      "status": 0,
+      "signal": null,
+      "log": "12-patched-client-ci.log"
+    },
+    {
+      "label": "baseline-typecheck",
+      "status": 2,
+      "signal": null,
+      "log": "13-baseline-typecheck.log"
+    },
+    {
+      "label": "patched-typecheck",
+      "status": 2,
+      "signal": null,
+      "log": "14-patched-typecheck.log"
+    },
+    {
+      "label": "server-tests",
+      "status": 0,
+      "signal": null,
+      "log": "15-server-tests.log"
+    },
+    {
+      "label": "authenticated-routes",
+      "status": 0,
+      "signal": null,
+      "log": "16-authenticated-routes.log"
+    },
+    {
+      "label": "server-build",
+      "status": 0,
+      "signal": null,
+      "log": "17-server-build.log"
+    },
+    {
+      "label": "client-tests",
+      "status": 0,
+      "signal": null,
+      "log": "18-client-tests.log"
+    },
+    {
+      "label": "client-build",
+      "status": 0,
+      "signal": null,
+      "log": "19-client-build.log"
+    },
+    {
+      "label": "actual-dockerfile",
+      "status": 0,
+      "signal": null,
+      "log": "20-actual-dockerfile.log"
+    },
+    {
+      "label": "compiled-production-runtime",
+      "status": 0,
+      "signal": null,
+      "log": "21-compiled-production-runtime.log"
+    },
+    {
+      "label": "save-candidate",
+      "status": 0,
+      "signal": null,
+      "log": "22-save-candidate.log"
+    },
+    {
+      "label": "compress-candidate",
+      "status": 0,
+      "signal": null,
+      "log": "23-compress-candidate.log"
+    }
+  ]
+}
