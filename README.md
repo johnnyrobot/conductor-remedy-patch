@@ -1,7 +1,7 @@
 # conductor-remedy-patch
 
 The **Conductor side** of the LibreTexts Remedy accessibility matrix, shipped as
-target-specific twenty-one-patch `git am` series against upstream Conductor, with
+target-specific twenty-two-patch `git am` series against upstream Conductor, with
 the original sixteen-patch delivery retained for history.
 
 This repository contains no Conductor source of its own. It is a delivery
@@ -20,10 +20,10 @@ targets selected by the Chief, not observations of the running production versio
 
 | Target | Manifest | Resulting source tree |
 |---|---|---|
-| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `bec06bcc8e480068d4517396536e82ed68729e86` |
-| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `6d403848f76161624ccaa9051cc191dbfd16876d` |
+| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `06fa225f313adec4bc9b6e6c4c207f596c8f719a` |
+| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `59e1b325c710b5be84c33dfb0a6e25cce1ae02ca` |
 
-Each manifest lists its own twenty-one ordered patches and SHA-256 checksums. Use
+Each manifest lists its own twenty-two ordered patches and SHA-256 checksums. Use
 Node 22 and a fresh **detached** clone; the command refuses a wrong base, dirty
 checkout, active branch, changed patch or escaping path before application.
 
@@ -51,8 +51,9 @@ engine configuration. Patch0020 supplies signed operations and read-only status 
 release still requires the remaining operational/deployment gates. Never deploy an image selected by `latest`.
 
 [LT-156 indexed projection evidence](docs/releases/lt156-indexed-projection.md) records
-patch0021, unchanged ordered selection and same-host sizing. Bounded responses
-and history storage remain LT-157 release gates.
+patch0021, unchanged ordered selection and same-host sizing. Patch0022 adds bounded detail/history reads and immutable write-ahead operation
+records; [LT-157 evidence and storage handoff](docs/releases/lt157-bounded-history.md)
+describe explicit limits, complete exports and downgrade constraints.
 
 [LT-140 signed-operation and integration evidence](docs/releases/lt140-reviewed-operations.md)
 records patch0020, actual three-service HTTP validation and remaining gates.
@@ -212,6 +213,26 @@ process's `ORG_ID` and stored `Project.orgID`, `REMEDY_API_BASE_URL` (explicit o
 and `REMEDY_API_KEY`. Legacy `PROJECT_REMEDY_*` aliases no longer enable Remedy. Do not infer that a missing key or a localhost
 fallback is acceptable in production. Do not expose a Bridge staff panel. See the
 [configuration and storage requirements](docs/integration/pinned-targets.md).
+
+Reviewed writes additionally require these signer settings (LT-148):
+
+| Setting | Prerequisite |
+|---|---|
+| `REMEDY_REVIEWER_SIGNING_KEY_FILE` | Protected Ed25519 private-key file path; never browser configuration. |
+| `REMEDY_REVIEWER_KEY_ID` | Enabled key ID present in the coordinated Bridge keyring. |
+| `REMEDY_REVIEWER_ISSUER` | Reviewed Conductor issuer matching Bridge trust policy. |
+| `REMEDY_REVIEWER_AUDIENCE` | Reviewed audience matching Bridge policy. |
+| `REMEDY_REVIEWER_KEY_ENABLED` | Explicitly `true`. |
+| `REMEDY_REVIEWER_KEY_NOT_BEFORE` | Coordinated validity-window start, in epoch seconds. |
+| `REMEDY_REVIEWER_KEY_NOT_AFTER` | Coordinated validity-window end, in epoch seconds. |
+
+Missing, disabled or expired signing material leaves mutation unavailable while
+healthy authenticated read-only operation lookup remains usable; lookup never
+releases a pending claim. After applying the series, see the full
+`docs/remediation-integration.md` and `docs/remedy-storage-and-reads.md` guides.
+Keyring/trust-epoch coordination and real key rollout remain part of the reviewed
+deployment bundle; no real values or key material are supplied here.
+
 The approved full-stack deployment bundle must supply immutable image digests,
 network/auth/origin settings, backup/upgrade and rollback details; this repository
 does not yet provide that completed bundle.
@@ -240,10 +261,10 @@ question flows. Full release validation still covers the coordinated stack.
 
 | Target | Server unit | Client unit | Authenticated route/Mongo | Builds |
 |---|---:|---:|---:|---|
-| Staging pinned `67301b35` | 60 pass | 289 pass | 49 pass | Client/server pass |
-| Released floor `352a657e` | 30 pass | 196 pass | 49 pass | Client/server pass |
+| Staging pinned `67301b35` | 61 pass | 293 pass | 59 pass | Client/server pass |
+| Released floor `352a657e` | 31 pass | 200 pass | 59 pass | Client/server pass |
 
-LT-140 checks used Node 22.20.0 / npm 10.9.3 with the matching target's
+The current table records LT-157 checks; LT-140 historical checks used Node 22.20.0 / npm 10.9.3 with the matching target's
 previously installed, unchanged lockfile dependencies. Both built servers reached
 real `/health` 200 under production mode with synthetic configuration and isolated
 MongoDB **7.0.14**. These were macOS process boots. The earlier compatibility

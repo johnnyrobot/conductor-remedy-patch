@@ -1,0 +1,14 @@
+{
+  "runId": "86ec6117-08a0-46b7-957f-dab1fb67ccaa",
+  "testId": "c3691d8c-3935-46a7-be87-1d2805f36561",
+  "status": "passed",
+  "startedAt": "2026-10-29T15:49:33.316Z",
+  "finishedAt": "2026-10-29T15:52:25.595Z",
+  "stepSummary": {
+    "total": 17,
+    "completed": 17,
+    "passedCount": 17,
+    "failedCount": 0
+  },
+  "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/c66ab795-72b2-5244-b0a2-0c60b1512705/projects/4e433799-7c02-442f-8d07-1a99dce6620c/test-cases/c3691d8c-3935-46a7-be87-1d2805f36561"
+}

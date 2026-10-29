@@ -1,0 +1,18 @@
+[
+  {
+    "step": 10,
+    "snapshotBeforeAction": true,
+    "applyDisabled": true,
+    "currentAndProposedHTML": true,
+    "diffRemovesBold": true,
+    "diffAddsHeading": true
+  },
+  {
+    "step": 11,
+    "snapshotBeforeAction": true,
+    "applyDisabled": false,
+    "currentAndProposedHTML": true,
+    "diffRemovesBold": true,
+    "diffAddsHeading": true
+  }
+]
