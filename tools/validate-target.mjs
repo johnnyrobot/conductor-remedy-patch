@@ -71,6 +71,7 @@ function run(
     capture = false,
   } = {},
 ) {
+  process.stdout.write(`[${manifest.target}] ${label} started\n`);
   const file = path.join(
       logs,
       `${String(++count).padStart(2, "0")}-${label}.log`,
@@ -89,6 +90,7 @@ function run(
     log: path.basename(file),
   };
   checks.push(record);
+  process.stdout.write(`[${manifest.target}] ${label} exit=${result.status}\n`);
   if (result.error || (result.status !== 0 && !allowFailure))
     throw Error(`${label} failed: exit=${result.status}; inspect ${file}`);
   return {
