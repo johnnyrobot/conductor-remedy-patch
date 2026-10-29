@@ -4,9 +4,9 @@
   "role": "secondary-released-floor",
   "upstreamRepository": "https://github.com/LibreTexts/conductor.git",
   "baseCommit": "352a657ec6de7b317a70ad3f8f744bc6d5054d9d",
-  "expectedTree": "cebc22f13d824ee8eb3485191e77ea1f5f72a001",
+  "expectedTree": "a60544214de7d3613e1dad0da99a6c62722c49a8",
   "upstreamPackageVersion": "2.156.2",
-  "sourceCommit": "b5205869090453ef48c5032b2c6de21a419c4fb4",
+  "sourceCommit": "e11eeaab293ff0192a60b9deef4ea23a34bb933b",
   "patches": [
     {
       "path": "patches/0001-feat-a11y-carry-CXone-pageID-on-review-sections-extr.patch",
@@ -131,6 +131,10 @@
     {
       "path": "patches/0031-fix-a11y-match-the-producer-opaque-trust-epoch-exact.patch",
       "sha256": "02c77d669e6e23b9d1c52ede310c80e74e898dc4f73123c65ed93a0e24a3e976"
+    },
+    {
+      "path": "patches/0032-docs-a11y-point-current-recovery-guidance-to-termina.patch",
+      "sha256": "623c32943b390e7d6a83b80ce7e414f692c8ca7c420fcc7307caa45b1a56b672"
     }
   ],
   "upstreamScripts": {

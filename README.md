@@ -1,7 +1,7 @@
 # conductor-remedy-patch
 
 The **Conductor side** of the LibreTexts Remedy accessibility matrix, shipped as
-target-specific thirty-one-patch `git am` series against upstream Conductor, with
+target-specific thirty-two-patch `git am` series against upstream Conductor, with
 the original sixteen-patch delivery retained for history.
 
 This repository contains no Conductor source of its own. It is a delivery
@@ -95,10 +95,10 @@ targets selected by the Chief, not observations of the running production versio
 
 | Target | Manifest | Resulting source tree |
 |---|---|---|
-| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `030788418ec984471879aa5cc9586d1149da018e` |
-| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `cebc22f13d824ee8eb3485191e77ea1f5f72a001` |
+| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `1edf0ba1516e39731f5c3289e31045bffda311f3` |
+| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `a60544214de7d3613e1dad0da99a6c62722c49a8` |
 
-Each manifest lists its own thirty-one ordered patches and SHA-256 checksums. Use
+Each manifest lists its own thirty-two ordered patches and SHA-256 checksums. Use
 Node 22 and a fresh **detached** clone; the command refuses a wrong base, dirty
 checkout, active branch, changed patch or escaping path before application.
 

@@ -41,7 +41,7 @@ timing. This receipt neither authorizes writes nor certifies production readines
 
 ## Component evidence
 
-Both original 28-patch series remain byte-identical, with additive patches29–31.
+Both original 28-patch series remain byte-identical, with additive patches29–32.
 Fresh detached reconstruction receipts and the actual owned-service report are
 in `evidence/lt180/`. Exact final Linux/image/review/merge receipts belong in the
 pull request and issue; historical image reports are not current proof.

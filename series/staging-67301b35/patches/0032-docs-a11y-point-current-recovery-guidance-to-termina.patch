@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: johnnyrobot <174211481+johnnyrobot@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 14:59:32 -0700
+Subject: [PATCH] docs(a11y): point current recovery guidance to terminal proof
+ workflow (LT-180)
+
+---
+ docs/remediation-integration.md | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/docs/remediation-integration.md b/docs/remediation-integration.md
+index d36c1859..656b24e5 100644
+--- a/docs/remediation-integration.md
++++ b/docs/remediation-integration.md
+@@ -268,8 +268,7 @@ readiness/signing requirements. Automatic production writes remain held pending
+ vendor-supported revision-atomic conditional-edit proof and authorized validation
+ owned by LibreTexts' integration/deployment team. Existing explicit unknown-write
+ recovery, append-only operation history, storage backup/upgrade/rollback policy
+-and human conformance separation remain unchanged. Terminal-proof recovery
+-LT-180 still awaits LT-179; no status-equality or generic unlock is added.
++and human conformance separation remain unchanged. Trusted terminal-proof recovery is described in `remedy-terminal-recovery.md`; no status-only or generic unlock is added.
+ 
+ 
+ ## Trusted terminal recovery (LT-180)
+-- 
+2.54.0 (Apple Git-157)
+
