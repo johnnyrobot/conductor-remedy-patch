@@ -1,10 +1,9 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: johnnyrobot <174211481+johnnyrobot@users.noreply.github.com>
-Date: Thu, 29 Oct 2026 07:18:10 -0700
+Date: Thu, 29 Oct 2026 07:21:28 -0700
 Subject: [PATCH] perf(a11y): index current conformance review selection
  (LT-156)
 
-Preserve supplied history order and exact scope/fingerprint matches while selecting current reviews once. Add differential projection, authenticated export coverage and a synthetic same-host sizing probe.
 ---
  server/integration/remedy-routes.test.ts | 31 ++++++++++++++++++
  server/scripts/benchmarkConformance.ts   | 11 +++++++
@@ -54,7 +53,7 @@ index c4292ace..72e60408 100644
 +});
 diff --git a/server/scripts/benchmarkConformance.ts b/server/scripts/benchmarkConformance.ts
 new file mode 100644
-index 00000000..9d9d72ad
+index 00000000..a27df574
 --- /dev/null
 +++ b/server/scripts/benchmarkConformance.ts
 @@ -0,0 +1,11 @@
@@ -67,7 +66,7 @@ index 00000000..9d9d72ad
 + const reviews=sections.flatMap(s=>criteria.map(c=>({_id:`${s._id}-${c.id}`,sectionID:s._id,criterionID:c.id,fingerprint:pageFingerprint(s),scopeVersion:scope.version,status:'pass'})));
 + const milliseconds:number[]=[];let report:any;
 + for(let i=0;i<3;i++){const start=performance.now();report=conformanceReport({projectID:'synthetic',a11yReview:sections},scope,reviews,[],now);milliseconds.push(+(performance.now()-start).toFixed(2));}
-+ console.log(JSON.stringify({pages:count,reviews:reviews.length,milliseconds,outputBytes:Buffer.byteLength(JSON.stringify(report)),verified:report.verifiedCriteria}));
++ process.stdout.write(JSON.stringify({pages:count,reviews:reviews.length,milliseconds,outputBytes:Buffer.byteLength(JSON.stringify(report)),verified:report.verifiedCriteria})+'\n');
 +}
 diff --git a/server/util/conformance.test.ts b/server/util/conformance.test.ts
 index 1a61cdb8..6c09c27d 100644
