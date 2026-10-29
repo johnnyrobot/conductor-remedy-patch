@@ -1,0 +1,9 @@
+{"probe":"conformance","pages":10,"reviews":500,"milliseconds":[0.9,0.32,0.3],"outputBytes":402965,"verified":500}
+{"probe":"conformance","pages":50,"reviews":2500,"milliseconds":[1.98,1.04,1.28],"outputBytes":2016087,"verified":2500}
+{"probe":"conformance","pages":100,"reviews":5000,"milliseconds":[3.08,1.74,1.79],"outputBytes":4032487,"verified":5000}
+{"probe":"conformance","pages":250,"reviews":12500,"milliseconds":[6.93,3.44,3.72],"outputBytes":10097439,"verified":12500}
+{"probe":"conformance","pages":500,"reviews":25000,"milliseconds":[11.12,7.38,7.03],"outputBytes":20205689,"verified":25000}
+{"probe":"queueCandidates","findings":100,"milliseconds":[0.48,0.15,0.14],"count":100}
+{"probe":"queueCandidates","findings":1000,"milliseconds":[4.95,5.23,5.19],"count":1000}
+{"probe":"queueCandidates","findings":5000,"milliseconds":[99.39,72.61,65.84],"count":5000}
+{"probe":"queueCandidates","findings":10000,"milliseconds":[248.7,241.41,245.26],"count":10000}
