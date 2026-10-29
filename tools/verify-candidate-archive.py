@@ -17,6 +17,8 @@ def digest(stream):
 
 
 def verify(index, target, zip_path):
+    if not __debug__:
+        raise RuntimeError("Verification requires Python without -O/PYTHONOPTIMIZE.")
     candidate = next(c for c in index["candidates"] if c["target"] == target)
     expected = candidate["validation"]
     with Path(zip_path).open("rb") as stream:

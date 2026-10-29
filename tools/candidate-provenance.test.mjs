@@ -39,3 +39,11 @@ test('reconstructed Docker/lock inputs must match the reviewed source inputs', a
   fs.writeFileSync(path.join(directory,'Dockerfile'),'changed base');
   assert.throws(()=>verifyCandidateSource(candidate,directory),/source input drift: Dockerfile/);
 });
+test('an absolute or symlinked CLI path still performs verification', async () => {
+  const os=await import('node:os'), path=await import('node:path'), {spawnSync}=await import('node:child_process');
+  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'candidate-cli-test-'));
+  const link=path.join(directory,'verify.mjs');fs.symlinkSync(path.join(repo,'tools/candidate-provenance.mjs'),link);
+  const result=spawnSync(process.execPath,[link],{encoding:'utf8'});
+  assert.equal(result.status,0,result.stderr);
+  assert.equal(JSON.parse(result.stdout).verified,true);
+});

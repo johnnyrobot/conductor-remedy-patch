@@ -53,7 +53,7 @@ export function verifyCandidates(repo, index, {requireUnexpired=false, now=new D
   }
   return {verified:true, sourceInputsUnchanged:true, expired:index.candidates.some(c => new Date(c.validation.artifactExpiresAt) <= now)};
 }
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const repo = fileURLToPath(new URL('../',import.meta.url));
   const index = JSON.parse(fs.readFileSync(path.join(repo,'docs/releases/current-candidates.json')));
   console.log(JSON.stringify(verifyCandidates(repo,index,{requireUnexpired:process.argv.includes('--require-unexpired')})));

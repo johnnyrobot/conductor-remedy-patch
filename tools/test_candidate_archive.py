@@ -9,6 +9,7 @@ import tarfile
 import tempfile
 import unittest
 import sys
+import subprocess
 sys.dont_write_bytecode = True
 import zipfile
 
@@ -49,6 +50,15 @@ class ArchiveVerification(unittest.TestCase):
             for field in ["artifactDigest","imageID","archiveSHA256"]:
                 changed=copy.deepcopy(index);changed["candidates"][0]["validation"][field]="sha256:"+"0"*64
                 with self.assertRaises(AssertionError):verifier.verify(changed,"fixture",file)
+
+    def test_optimized_python_cannot_report_verified(self):
+        with tempfile.TemporaryDirectory() as directory:
+            index,file=self.fixture(directory)
+            source=Path(directory)/"index.json";source.write_text(json.dumps(index))
+            result=subprocess.run([sys.executable,"-O",str(Path(__file__).with_name("verify-candidate-archive.py")),str(source),"fixture",str(file)],capture_output=True,text=True)
+            self.assertNotEqual(result.returncode,0)
+            self.assertIn("without -O/PYTHONOPTIMIZE",result.stderr)
+            self.assertNotIn('"verified": true',result.stdout)
 
     def test_layer_tamper_is_rejected_even_with_matching_config_and_outer_archives(self):
         with tempfile.TemporaryDirectory() as directory:
