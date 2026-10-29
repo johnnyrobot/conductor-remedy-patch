@@ -29,8 +29,10 @@ order, audit/commit distinction, quotas and rollback rules.
 Node 22.20.0 / npm 10.9.3, isolated MongoDB 7.0.14 standalone, unchanged matching
 lockfile dependencies. Standalone tsc still fails with exactly 60 inherited
 normalized diagnostics; no clean typecheck is claimed. Fresh original 22-patch
-application plus the delta matches both tested trees. Final 23-patch proof and
-the complete shared review gate are recorded in the PR.
+application plus the delta matches both tested trees. Both final 23-patch reconstructions match the manifests and delivery-tool 6/6
+tests pass. Two native Standards/Spec/Correctness rounds found no critical/major
+defects; three minor service/logging/export-order findings are fixed. The single
+CodeRabbit/fallback outcome is recorded in the PR.
 
 Component cases cover ordinary actor/outsider/foreign project denial, strict
 browser-field rejection, confirmation/reason/version, unresolved or changed
@@ -52,8 +54,11 @@ with one commit marker, two preparations (one losing race), six original events
 unchanged, zero mutation retries and both other claims still pending. Remote
 outcome remains unknown and human verification remains pending. Sanitized
 [actual-service observations](evidence/lt127/actual-services.json) contain no keys,
-session credentials or private assertion material. This is macOS development
-proof, not Linux/live provider/production CAS certification.
+session credentials or private assertion material. The final extracted service was then exercised through a second separate real
+offline resolution: current version came from the authenticated API, signing
+remained disabled, both commit references appeared in the complete export, and
+the known-success claim remained held. This is macOS development proof, not
+Linux/live provider/production CAS certification.
 
 The approved paid UI A+C pair was already completed on the unchanged UI in
 LT-157 for exactly one credit. No additional paid test, B retry or fabricated

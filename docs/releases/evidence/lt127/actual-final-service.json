@@ -1,0 +1,11 @@
+{
+  "synthetic": true,
+  "actualFinalService": true,
+  "secondSeparateResolution": true,
+  "currentVersionReadFromAuthenticatedAPI": true,
+  "signerDisabled": true,
+  "commitMarkers": 2,
+  "allCommitReferencesPresent": true,
+  "knownSuccessClaimStillHeld": true,
+  "noMutationRetry": true
+}
