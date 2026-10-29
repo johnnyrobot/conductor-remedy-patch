@@ -1,24 +1,25 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: johnnyrobot <174211481+johnnyrobot@users.noreply.github.com>
-Date: Thu, 29 Oct 2026 09:47:58 -0700
+Date: Thu, 29 Oct 2026 10:08:18 -0700
 Subject: [PATCH] feat(a11y): resolve only audited settled page claims with
  fresh evidence (LT-127)
 
-Require current support policy, durable Bridge resolved status and explicit local version; append immutable preparation and bounded atomic commit marker before releasing only that claim. Preserve unknown outcomes and keep lost-success cases held.
 ---
  docs/remedy-explicit-recovery.md           | 128 +++++++++++++++++++++
- server/api/remediationactions.ts           |  13 ++-
+ server/api/remediationactions.ts           |  17 ++-
  server/api/remediationqueue.ts             |   4 +-
- server/api/remedyrecovery.ts               |  79 +++++++++++++
+ server/api/remedyrecovery.ts               |  22 ++++
+ server/api/services/remedy-recovery.ts     |  67 +++++++++++
  server/api/validators/remedy-resolution.ts |   6 +
- server/integration/remedy-routes.test.ts   | 103 ++++++++++++++++-
+ server/integration/remedy-routes.test.ts   | 104 ++++++++++++++++-
  server/models/project.ts                   |   2 +
  server/util/a11yreviewutils.ts             |   2 +
  server/util/conformance.test.ts            |   9 ++
  server/util/conformance.ts                 |   4 +-
- 10 files changed, 340 insertions(+), 10 deletions(-)
+ 11 files changed, 354 insertions(+), 11 deletions(-)
  create mode 100644 docs/remedy-explicit-recovery.md
  create mode 100644 server/api/remedyrecovery.ts
+ create mode 100644 server/api/services/remedy-recovery.ts
  create mode 100644 server/api/validators/remedy-resolution.ts
 
 diff --git a/docs/remedy-explicit-recovery.md b/docs/remedy-explicit-recovery.md
@@ -156,7 +157,7 @@ index 00000000..8f85d936
 +or source-equality unlock is implemented here. LT-127's broader recovery ticket
 +and LT-111 production release remain open for that decision and other gates.
 diff --git a/server/api/remediationactions.ts b/server/api/remediationactions.ts
-index ff581020..b058597c 100644
+index ff581020..a20f9884 100644
 --- a/server/api/remediationactions.ts
 +++ b/server/api/remediationactions.ts
 @@ -1,3 +1,4 @@
@@ -164,7 +165,7 @@ index ff581020..b058597c 100644
  import { workItemAppendBudget, requireEventBudget, requireWorkItemBudget } from '../util/remedyBudgets.js';
  import { beginRemedyExport } from '../util/remedyExports.js';
  import { pagination, encodeCursor, recordSnapshot, READ_TIMEOUT_MS } from '../util/conformanceReads.js';
-@@ -9,17 +10,18 @@ import { requireRemedyConfiguration } from '../util/remedyConfig.js';
+@@ -9,17 +10,20 @@ import { requireRemedyConfiguration } from '../util/remedyConfig.js';
  import { checkedPreview, checkedOutcome, reviewError, reviewInputs, reviewSession, safeOperationMetadata, signingConfiguration, signReviewedOperation } from '../util/remedyReview.js';
  
  /** Page actions and scoped status lookup use the same project authorization seam. */
@@ -176,9 +177,12 @@ index ff581020..b058597c 100644
      const stream=beginRemedyExport(res);
      try {
        if(!req.queueOperationAdmin||!req.queueCanEdit)throw reviewError('Support or superadmin project access required for operation export.',403);
-       const Records=remedyOperationRecords(),upper=await recordSnapshot(Records,stream.signal);
+-      const Records=remedyOperationRecords(),upper=await recordSnapshot(Records,stream.signal);
 -      const legacy=await Project.findOne({projectID:req.params.projectID}).select('+remedyOperations').setOptions({signal:stream.signal}).maxTimeMS(READ_TIMEOUT_MS).lean();
++      const Records=remedyOperationRecords();
++      // Every captured commit marker must precede the immutable-record cutoff.
 +      const legacy=await Project.findOne({projectID:req.params.projectID}).select('+remedyOperations +remedyResolutionCommits').setOptions({signal:stream.signal}).maxTimeMS(READ_TIMEOUT_MS).lean();
++      const upper=await recordSnapshot(Records,stream.signal);
        res.setHeader('Cache-Control','no-store');res.setHeader('Content-Type','application/json');
        res.setHeader('Content-Disposition',`attachment; filename="${req.params.projectID}-remedy-operations.json"`);
 -      await stream.write(JSON.stringify({projectID:req.params.projectID,legacyOperationHistory:legacy?.remedyOperations||[],exportSnapshot:String(upper)}).slice(0,-1)+',"operationHistory":[');
@@ -186,7 +190,7 @@ index ff581020..b058597c 100644
        const cursor=stream.openCursor(()=>Records.find({projectID:req.params.projectID,_id:{$lte:upper}}).sort({_id:1}).maxTimeMS(120_000).cursor({batchSize:100}));let first=true;
        for await(const record of cursor){await stream.write((first?'':',')+JSON.stringify(record));first=false;}
        await stream.write('],"complete":true}');res.end();
-@@ -59,7 +61,8 @@ export function registerRemediationActions(router: any, { base, access, Project,
+@@ -59,7 +63,8 @@ export function registerRemediationActions(router: any, { base, access, Project,
        const outcome = checkedOutcome(result, intent.action);
        if (!outcome) throw reviewError('The operation status is unavailable or ambiguous. Keep the page blocked and contact the deployment operator.', 502);
        return res.json({ err: false, localOperationID: intent.localID, operation: safeOperationMetadata(outcome.metadata),
@@ -196,7 +200,7 @@ index ff581020..b058597c 100644
          message: 'Read-only operation evidence. This lookup does not release a pending claim, repair audit history, rescan or retry a write.' });
      } catch (error: any) {
        return res.status(error.status || 502).json({ err: true, errMsg: error.publicMessage || 'Operation evidence is unavailable. Keep the page blocked; do not retry the write.' });
-@@ -150,7 +153,7 @@ export function createRemediationActionHandler({ Project, WorkItems, OperationRe
+@@ -150,7 +155,7 @@ export function createRemediationActionHandler({ Project, WorkItems, OperationRe
          const signed = signReviewedOperation(signingConfiguration(), review.binding, actor, review.expiresAt);
          const candidate = { kind: 'intent', localID: randomUUID(), actor, session, action, sectionID: req.params.sectionID, at: new Date(),
            issuer: signed.issuer, jti: signed.jti, expiresAt: signed.exp, reviewID: review.id,
@@ -229,24 +233,44 @@ index 5aa770cf..9a7f7d4a 100644
        const {limit,cursor}=pagination(req.query);
 diff --git a/server/api/remedyrecovery.ts b/server/api/remedyrecovery.ts
 new file mode 100644
-index 00000000..125bc0ed
+index 00000000..dbc7a9fe
 --- /dev/null
 +++ b/server/api/remedyrecovery.ts
-@@ -0,0 +1,79 @@
-+import {BSON} from 'mongodb';
-+import {createHash,randomUUID} from 'node:crypto';
+@@ -0,0 +1,22 @@
 +import {Response} from 'express';
 +import {z} from 'zod';
 +import {ZodReqWithUser} from '../types/Express.js';
 +import middleware from '../middleware.js';
++import logger from '../logger.js';
 +import {resolveRemedyOperationSchema} from './validators/remedy-resolution.js';
-+import {criteria} from '../util/conformance.js';
-+import {appendOperation,storedIntent} from '../util/remedyOperationRecords.js';
-+import {checkedOutcome,reviewError,safeOperationMetadata} from '../util/remedyReview.js';
-+
-+type ResolutionRequest=ZodReqWithUser<z.infer<typeof resolveRemedyOperationSchema>>&{
-+ queueProject:any;queueCanEdit:boolean;queueOperationAdmin:boolean;
-+};
++import {resolveRemedyClaim} from './services/remedy-recovery.js';
++import {reviewError} from '../util/remedyReview.js';
++type ResolutionRequest=ZodReqWithUser<z.infer<typeof resolveRemedyOperationSchema>>&{queueProject:any;queueCanEdit:boolean;queueOperationAdmin:boolean};
++/** Administrative local recovery only, with existing auth/project policy. */
++export function registerRemedyRecovery(router:any,{base,access,Project,auth,bridge}:any){
++ router.post(`${base}/page/:sectionID/operations/:localID/resolve`,...access,middleware.validateZod(resolveRemedyOperationSchema),async(req:ResolutionRequest,res:Response)=>{
++  try{
++   if(!req.queueCanEdit||!req.queueOperationAdmin)throw reviewError('Support or superadmin project access is required for explicit resolution.',403);
++   const result=await resolveRemedyClaim({project:req.queueProject,projectID:req.params.projectID,sectionID:req.params.sectionID,localID:req.params.localID,actor:req.user.decoded.uuid,expectedVersion:req.body.expectedVersion,reason:req.body.reason},{Project,auth,bridge});
++   return res.json({err:false,...result});
++  }catch(error:any){
++   if(!error.publicMessage||(error.status||500)>=500)logger.error({err:{name:error.name,message:error.message,stack:error.stack},projectID:req.params.projectID,localOperationID:req.params.localID},'Administrative Remedy recovery failed');
++   return res.status(error.status||502).json({err:true,errMsg:error.publicMessage||'Resolution acknowledgement is unavailable. Refresh read-only operation evidence; do not automatically retry or clear a claim.'});
++  }
++ });
++}
+diff --git a/server/api/services/remedy-recovery.ts b/server/api/services/remedy-recovery.ts
+new file mode 100644
+index 00000000..7c627ab5
+--- /dev/null
++++ b/server/api/services/remedy-recovery.ts
+@@ -0,0 +1,67 @@
++import {BSON} from 'mongodb';
++import {createHash,randomUUID} from 'node:crypto';
++import {criteria} from '../../util/conformance.js';
++import {appendOperation,storedIntent} from '../../util/remedyOperationRecords.js';
++import {checkedOutcome,reviewError,safeOperationMetadata} from '../../util/remedyReview.js';
++type RecoveryInput={project:any;projectID:string;sectionID:string;localID:string;actor:string;expectedVersion:number;reason:string};
 +function currentTarget(section:any,intent:any){
 + const url=new URL(section.sectionURL),path=decodeURIComponent(url.pathname);
 + if(url.origin!=='https://dev.libretexts.org'||url.username||url.password||/[\\\x00-\x1f]/.test(path)||path.split('/').some(part=>part==='.'||part==='..')||!path.startsWith('/Sandboxes/johnnyphung/')
@@ -267,17 +291,15 @@ index 00000000..125bc0ed
 + if(BSON.calculateObjectSize({review,dojExceptions:result.doj_exceptions||result.dojExceptions||[]})>1024*1024)throw reviewError('Fresh scan evidence exceeds the explicit 1 MiB recovery budget. The claim remains held.',413);
 + return review;
 +}
-+/** Administrative local recovery only. No external write path exists here. */
-+export function registerRemedyRecovery(router:any,{base,access,Project,auth,bridge}:any){
-+ router.post(`${base}/page/:sectionID/operations/:localID/resolve`,...access,middleware.validateZod(resolveRemedyOperationSchema),async(req:ResolutionRequest,res:Response)=>{
-+  try{
-+   if(!req.queueCanEdit||!req.queueOperationAdmin)throw reviewError('Support or superadmin project access is required for explicit resolution.',403);
-+   const sections=(req.queueProject.a11yReview||[]).filter((section:any)=>String(section._id)===req.params.sectionID);
-+   const section=sections[0],intent=await storedIntent(req.queueProject,req.params.localID,req.params.sectionID);
++
++/** Owns the read/proof/write-ahead/CAS recovery workflow; never dispatches a mutation. */
++export async function resolveRemedyClaim(input:RecoveryInput,{Project,auth,bridge}:any){
++   const sections=(input.project.a11yReview||[]).filter((section:any)=>String(section._id)===input.sectionID);
++   const section=sections[0],intent=await storedIntent(input.project,input.localID,input.sectionID);
 +   if(!intent)throw reviewError('Operation is unavailable to this project user.',403);
-+   if(sections.length!==1||!section.remedyWritePending||section.remedyPendingOperation!==intent.localID||(section.remedyEvidenceVersion||0)!==req.body.expectedVersion)
++   if(sections.length!==1||!section.remedyWritePending||section.remedyPendingOperation!==intent.localID||(section.remedyEvidenceVersion||0)!==input.expectedVersion)
 +    throw reviewError('The pending claim or evidence version changed. Refresh operation evidence before continuing.');
-+   if((req.queueProject.remedyResolutionCommits?.length||0)>=1000)throw reviewError('Project resolution history reached its explicit 1,000-marker safety limit. Preserve/export it and contact the operator.');
++   if((input.project.remedyResolutionCommits?.length||0)>=1000)throw reviewError('Project resolution history reached its explicit 1,000-marker safety limit. Preserve/export it and contact the operator.');
 +   const target=currentTarget(section,intent);
 +   const status=checkedOutcome(await bridge('operation-status',{issuer:intent.issuer,jti:intent.jti}),intent.action);
 +   if(!status||status.metadata.reconciliation!=='resolved'||status.metadata.requires_reconciliation!==false||status.metadata.outcome!=='unknown_write')
@@ -289,28 +311,26 @@ index 00000000..125bc0ed
 +   const current=checkedOutcome(await bridge('operation-status',{issuer:intent.issuer,jti:intent.jti}),intent.action);
 +   if(!current||current.metadata.reconciliation!=='resolved'||current.metadata.requires_reconciliation||current.metadata.outcome!=='unknown_write'||current.metadata.operation_id!==status.metadata.operation_id||current.metadata.updated_at!==status.metadata.updated_at)
 +    throw reviewError('The durable operation status changed or became unavailable during the scan. The claim remains held.');
-+   if(!await auth.checkHasRoleByID(req.user.decoded.uuid,'libretexts',['support','superadmin']))throw reviewError('Administrative permission changed. The claim remains held.',403);
-+   const resolutionID=randomUUID(),event={kind:'resolution',localID:intent.localID,sectionID:req.params.sectionID,resolutionID,
-+    actor:req.user.decoded.uuid,at:new Date(),reason:req.body.reason,phase:'prepared_for_local_cas',expectedVersion:req.body.expectedVersion,
++   if(!await auth.checkHasRoleByID(input.actor,'libretexts',['support','superadmin']))throw reviewError('Administrative permission changed. The claim remains held.',403);
++   const resolutionID=randomUUID(),event={kind:'resolution',localID:intent.localID,sectionID:input.sectionID,resolutionID,
++    actor:input.actor,at:new Date(),reason:input.reason,phase:'prepared_for_local_cas',expectedVersion:input.expectedVersion,
 +    originalActor:intent.actor,issuer:intent.issuer,jti:intent.jti,action:intent.action,target:intent.binding.target,
 +    operation:safeOperationMetadata(status.metadata),scanHash:createHash('sha256').update(JSON.stringify(review)).digest('hex'),scannedAt:review.scannedAt};
 +   // Journal preparation before CAS; a bounded append-only marker in that same
 +   // Project CAS permanently identifies the winner, even after a TOC removal.
-+   await appendOperation(req.params.projectID,event);
-+   const saved=await Project.updateOne({projectID:req.params.projectID,
-+    $expr:{$and:[...['members','leads','liaisons','orgID'].map(key=>({$eq:[{$ifNull:[`$${key}`,key==='orgID'?'':[]]},{$literal:req.queueProject[key]??(key==='orgID'?'':[])}]})),{$lt:[{$size:{$ifNull:['$remedyResolutionCommits',[]]}},1000]},{$lt:[{$bsonSize:'$$ROOT'},12*1024*1024]}]},
++   await appendOperation(input.projectID,event);
++   const saved=await Project.updateOne({projectID:input.projectID,
++    $expr:{$and:[...['members','leads','liaisons','orgID'].map(key=>({$eq:[{$ifNull:[`$${key}`,key==='orgID'?'':[]]},{$literal:input.project[key]??(key==='orgID'?'':[])}]})),{$lt:[{$size:{$ifNull:['$remedyResolutionCommits',[]]}},1000]},{$lt:[{$bsonSize:'$$ROOT'},12*1024*1024]}]},
 +    a11yReview:{$elemMatch:{_id:section._id,sectionURL:section.sectionURL,pageID:section.pageID,remedyWritePending:true,remedyPendingOperation:intent.localID,
-+     remedyEvidenceVersion:req.body.expectedVersion===0?{$in:[null,0]}:req.body.expectedVersion}}},
++     remedyEvidenceVersion:input.expectedVersion===0?{$in:[null,0]}:input.expectedVersion}}},
 +    {$set:{'a11yReview.$.wcagReview':review,'a11yReview.$.dojExceptions':result.doj_exceptions||result.dojExceptions||[],
 +      'a11yReview.$.remedyError':'','a11yReview.$.remedyLastScannedAt':new Date(),'a11yReview.$.remedyWritePending':false,
-+      'a11yReview.$.remedyResolutionEpoch':resolutionID,'a11yReview.$.remedyLastResolution':{id:resolutionID,localID:intent.localID,actor:req.user.decoded.uuid,at:event.at,scanHash:event.scanHash}},
-+     $push:{remedyResolutionCommits:{id:resolutionID,localID:intent.localID,actor:req.user.decoded.uuid,at:event.at,evidenceVersion:req.body.expectedVersion+1}},
++      'a11yReview.$.remedyResolutionEpoch':resolutionID,'a11yReview.$.remedyLastResolution':{id:resolutionID,localID:intent.localID,actor:input.actor,at:event.at,scanHash:event.scanHash}},
++     $push:{remedyResolutionCommits:{id:resolutionID,localID:intent.localID,actor:input.actor,at:event.at,evidenceVersion:input.expectedVersion+1}},
 +     $inc:{'a11yReview.$.remedyEvidenceVersion':1},$unset:{'a11yReview.$.remedyPendingOperation':'','a11yReview.$.remedyReviewedPreview':''}},
 +    {writeConcern:{w:'majority',j:true,wtimeout:10000}});
 +   if(saved.acknowledged===false||saved.matchedCount!==1)throw reviewError('The page or claim changed during resolution. No conflicting evidence was overwritten.');
-+   return res.json({err:false,resolved:true,resolutionID,localOperationID:intent.localID,evidenceVersion:req.body.expectedVersion+1,operation:safeOperationMetadata(status.metadata),message:'The matching local claim was resolved after a fresh scan. Human conformance remains pending.'});
-+  }catch(error:any){return res.status(error.status||502).json({err:true,errMsg:error.publicMessage||'Resolution acknowledgement is unavailable. Refresh read-only operation evidence; do not automatically retry or clear a claim.'});}
-+ });
++   return {resolved:true,resolutionID,localOperationID:intent.localID,evidenceVersion:input.expectedVersion+1,operation:safeOperationMetadata(status.metadata),message:'The matching local claim was resolved after a fresh scan. Human conformance remains pending.'};
 +}
 diff --git a/server/api/validators/remedy-resolution.ts b/server/api/validators/remedy-resolution.ts
 new file mode 100644
@@ -325,7 +345,7 @@ index 00000000..dd83eb27
 + body:z.object({expectedVersion:z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER-1),confirmed:z.literal(true),reason:z.string().trim().min(20).max(4000)}).strict(),
 +});
 diff --git a/server/integration/remedy-routes.test.ts b/server/integration/remedy-routes.test.ts
-index 6c6da122..faf03729 100644
+index 6c6da122..f8b0bddf 100644
 --- a/server/integration/remedy-routes.test.ts
 +++ b/server/integration/remedy-routes.test.ts
 @@ -44,14 +44,14 @@ let holdTOC: (() => Promise<void>) | undefined;
@@ -345,7 +365,7 @@ index 6c6da122..faf03729 100644
  }
  const base = `/project/${projectID}/accessibility/workqueue`;
  const matrix = '/project/accessibility/remedy';
-@@ -879,3 +879,102 @@ test('actual 500-page 25k-review summary stays bounded while preserving complete
+@@ -879,3 +879,103 @@ test('actual 500-page 25k-review summary stays bounded while preserving complete
   const bytes=Buffer.byteLength(JSON.stringify(response.data));assert.ok(bytes<1_000_000,'default summary has an explicit bounded shape');
   process.stdout.write(JSON.stringify({synthetic:true,probe:'authenticated-summary',pages:500,reviews:25000,milliseconds,bytes})+'\n');
  });
@@ -367,6 +387,7 @@ index 6c6da122..faf03729 100644
 + const after=await Project.findOne({projectID}).lean(),section=after!.a11yReview[0];
 + assert.equal(section.remedyWritePending,false);assert.equal(section.remedyPendingOperation,undefined);assert.equal(section.remedyEvidenceVersion,version+1);assert.ok(section.remedyResolutionEpoch);
 + const commit=await Project.findOne({projectID}).select('+remedyResolutionCommits').lean();assert.equal((commit as any).remedyResolutionCommits.length,1);assert.equal((commit as any).remedyResolutionCommits[0].id,response.data.resolutionID);
++ const exported=await request(base+'/operations/report','GET',undefined,'auditor');assert.equal(exported.status,200);for(const marker of exported.data.resolutionCommits)assert.ok(exported.data.operationHistory.some((record:any)=>record.kind==='resolution'&&record.event.resolutionID===marker.id));
 + assert.equal(calls.filter(c=>c.path.endsWith('/apply-fix')).length,1,'resolution never retries a remote mutation');
 + const events=await Records.find({projectID}).sort({_id:1}).toArray();assert.deepEqual(events.slice(0,original.length),original);assert.equal(events.filter(r=>r.kind==='resolution').length,1);
 + assert.equal((await request(base+'/conformance')).data.report.verifiedCriteria,0,'resolution cannot revive an old human review');
