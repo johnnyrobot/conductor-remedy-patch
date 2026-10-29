@@ -1,0 +1,227 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: johnnyrobot <174211481+johnnyrobot@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 14:42:26 -0700
+Subject: [PATCH 30/30] fix(a11y): recheck resolver authority at terminal proof
+ commit (LT-180)
+
+---
+ docs/remediation-integration.md          |  11 +++
+ docs/remedy-terminal-recovery.md         | 116 +++++++++++++++++++++++
+ server/api/services/remedy-recovery.ts   |   5 +-
+ server/integration/remedy-routes.test.ts |  16 +++-
+ 4 files changed, 144 insertions(+), 4 deletions(-)
+ create mode 100644 docs/remedy-terminal-recovery.md
+
+diff --git a/docs/remediation-integration.md b/docs/remediation-integration.md
+index 9575c139..d36c1859 100644
+--- a/docs/remediation-integration.md
++++ b/docs/remediation-integration.md
+@@ -270,3 +270,14 @@ owned by LibreTexts' integration/deployment team. Existing explicit unknown-writ
+ recovery, append-only operation history, storage backup/upgrade/rollback policy
+ and human conformance separation remain unchanged. Terminal-proof recovery
+ LT-180 still awaits LT-179; no status-equality or generic unlock is added.
++
++
++## Trusted terminal recovery (LT-180)
++
++See `remedy-terminal-recovery.md` for the exact `cxone-terminal-v1` contract,
++separate non-secret `REMEDY_REVIEWER_TRUST_EPOCH` prerequisite, explicit support
++action, fresh-scan/proof revalidation and immutable preparation/CAS workflow.
++Known terminal success/no-write proof needs no redundant offline ceremony; unknown
++outcomes retain only their existing offline-resolution path. Lookup never clears
++a claim or retries a write, historical recovery needs no signer, and original
++audit/history/conformance separation and LibreTexts' write/rollout gate remain.
+diff --git a/docs/remedy-terminal-recovery.md b/docs/remedy-terminal-recovery.md
+new file mode 100644
+index 00000000..c53739c2
+--- /dev/null
++++ b/docs/remedy-terminal-recovery.md
+@@ -0,0 +1,116 @@
++# Explicit recovery from trusted terminal operation proof
++
++The full signed integration and optional review-only mode use one implementation.
++LibreTexts chooses rollout timing and owns the vendor-supported revision-atomic
++write evidence and authorized validation needed before automatic writes are
++enabled. A terminal receipt neither clears that gate nor establishes conformance.
++
++## Prerequisites
++
++Use the coordinated authenticated Conductor → Server → Bridge deployment. This
++consumer implements `cxone-terminal-v1`, fixture `cxone-terminal-v1-fixtures-r1`,
++from Bridge commit `03d961d7fbfbcc36bad885f5ec06d5f289cba09e`:
++`docs/contracts/cxone-terminal-v1.md` and its adjacent fixtures. Server forwards
++the additive proof unchanged through the existing operation-status endpoint.
++Keep private routing and TLS off-host, normal user sessions, tenant opt-in and
++project permissions. Do not expose a Bridge panel or forward caller-selected
++issuer/nonce/target/proof fields.
++
++Conductor additionally needs **`REMEDY_REVIEWER_TRUST_EPOCH`** for terminal-proof
++recovery. This is a non-secret configuration value, separate from the seven
++signer settings: use the exact coordinated Bridge ledger/fence epoch, never a
++value learned from a response or a guessed default. This consumer accepts a
++nonempty value up to512 UTF-16 code units with no surrounding whitespace or
++ASCII control characters. Missing/invalid configuration disables only this
++terminal-proof path with a useful error. Ordinary startup/scan/preview and the
++existing unknown-outcome operator-resolution path remain available. No signing
++key is needed for historical recovery.
++
++Review-only historical lookup also requires Bridge's existing query-only store,
++independent fence and original issuer settings from `cxone-review-v1`. Missing
++or unhealthy historical storage is unavailable, not proof of no write.
++
++## Operator sequence
++
++1. Sign in normally as current support/superadmin with the deployment's existing
++   project/tenant policy. Preserve the operation export and original history.
++2. GET `/api/v1/project/<projectID>/accessibility/workqueue/page/<sectionID>/operations/<localID>`
++   with that session. Select only a stored local operation belonging to the
++   project. The server derives the original issuer/nonce; the lookup is read-only
++   and never clears a claim, scans, signs or retries a mutation. Record the
++   returned local `evidenceVersion` for the explicit action.
++3. For original terminal `known_success` or `not_attempted`, an authenticated
++   matching terminal proof can replace a redundant offline ceremony. It must
++   bind the original issuer/nonce/action/canonical target/full reviewed binding,
++   outer outcome/reason/audit/time, expected epoch and a safe integer store-wide
++   durability sequence. It is not a bearer token or separately signed permission.
++4. Explicitly POST to that same local URL with `/resolve` appended, using exactly
++   this body shape with the observed local version and an accurate reason:
++
++   ```json
++   {"expectedVersion":1,"confirmed":true,"reason":"Support verified the trusted terminal outcome and requests fresh canonical evidence."}
++   ```
++
++   The example version is illustrative; use the actual current response. No
++   operation ID, proof, actor, nonce, target or epoch override is accepted in the
++   body. Prefer an existing authenticated HTTP client or protected session cookie
++   jar; never paste a session token into a shared script or log.
++5. The server validates the stored intent and any already-known remote ID, reads
++   authoritative status, performs a fresh canonical source scan, and revalidates
++   the proof. It appends immutable preparation, rechecks terminal proof and
++   current administrator permission, then performs the existing local
++   evidence-version/permission/target CAS with its bounded durable commit marker.
++   Exactly that selected pending pointer is released. An unavailable original
++   remote ID is bound from trusted proof in preparation/commit references; the
++   original intent is never overwritten.
++6. Inspect the returned operation and exported preparation/commit reference.
++   Original actor, outcome, nonce and history remain. `audit_recorded:false`
++   stays false; a fresh scan does not manufacture historical audit. Human WCAG
++   verification remains pending and requires its independent reviewer workflow.
++
++The binding digest is Python sorted JSON with `ensure_ascii=True`, compact
++separators and UTF-8 SHA256, **not JCS**. Entire original bindings are hashed;
++non-ASCII characters/surrogate pairs are escaped as lower-case Unicode escapes.
++Committed exact-byte fixtures and independent Python Unicode vectors test this.
++Python3 is a test-oracle prerequisite for `test:remedy-integration`; the Conductor
++application itself uses native Node22 and needs no Python process for recovery.
++
++## Failure, unknown outcomes and retry policy
++
++`durability_seq` is store-wide context, not an operation version. Unrelated
++durable events can advance it. This implementation requires the entire observed
++proof/metadata snapshot to stay equal across the scan and preparation; a changed
++observation requires a new explicitly confirmed action. It never retries a write.
++Local version/permission/target races, failed fresh scans or failed journal/CAS
++writes leave the claim held; an orphan preparation is not a committed resolution.
++
++Pending, absent/404, malformed, mismatched or untrusted status stays held. Content
++equality and elapsed time are not settlement evidence. Unknown outcomes always
++have null terminal proof, including after operator resolution: use the existing
++drained offline unknown-resolution procedure, then the existing explicit local
++fresh-scan/CAS action. Do not force a known-success operation into generic
++`resolved` state or reinterpret a resolved unknown as success/no-op.
++
++`not_attempted/no_change` retains its original no-write meaning;
++`stale_preview`/`target_mismatch` retain evidence invalidation. Fresh source
++evidence never makes prior human approval current automatically.
++
++## Export, backup and rollback
++
++No new collection, migration or history rewrite is introduced. Preparation in
++`remedyoperationrecords` now optionally contains the complete validated
++`terminalProof` and recovery kind; its Project commit marker can reference the
++learned remote operation ID/contract. Existing full authenticated operation
++export preserves those fields with old events and resolution markers. Back up
++Projects and immutable records consistently with the original Bridge ledger,
++snapshots and protected trust context. The fence remains independent; never
++restore a database and its old fence together or silently reuse a stale epoch.
++
++Drain operations before coordinated upgrades/rollback or trust-epoch changes.
++Retain a runtime that understands current immutable operation storage and commit
++markers; do not downgrade to one that discards pending pointers or revalidates
++old human reviews. Preserve all original evidence and resolve uncertainty through
++the approved workflow. See `remedy-storage-and-reads.md`,
++`remediation-integration.md`, and Bridge's offline resolution/conditional-write
++gate guides. No live migration, credential provisioning, vendor call or write
++enablement is supplied by this document.
+diff --git a/server/api/services/remedy-recovery.ts b/server/api/services/remedy-recovery.ts
+index cdbe3da6..8e1c1854 100644
+--- a/server/api/services/remedy-recovery.ts
++++ b/server/api/services/remedy-recovery.ts
+@@ -58,7 +58,10 @@ export async function resolveRemedyClaim(input:RecoveryInput,{Project,auth,bridg
+    // Journal preparation before CAS; a bounded append-only marker in that same
+    // Project CAS permanently identifies the winner, even after a TOC removal.
+    await appendOperation(input.projectID,event);
+-   if(status.terminalProof)sameRecoveryStatus(status,await observe());
++   if(status.terminalProof){
++    sameRecoveryStatus(status,await observe());
++    if(!await auth.checkHasRoleByID(input.actor,'libretexts',['support','superadmin']))throw reviewError('Administrative permission changed. The claim remains held.',403);
++   }
+    const saved=await Project.updateOne({projectID:input.projectID,
+     $expr:{$and:[...['members','leads','liaisons','orgID'].map(key=>({$eq:[{$ifNull:[`$${key}`,key==='orgID'?'':[]]},{$literal:input.project[key]??(key==='orgID'?'':[])}]})),{$lt:[{$size:{$ifNull:['$remedyResolutionCommits',[]]}},1000]},{$lt:[{$bsonSize:'$$ROOT'},12*1024*1024]}]},
+     a11yReview:{$elemMatch:{_id:section._id,sectionURL:section.sectionURL,pageID:section.pageID,remedyWritePending:true,remedyPendingOperation:intent.localID,
+diff --git a/server/integration/remedy-routes.test.ts b/server/integration/remedy-routes.test.ts
+index 94c1f5cb..5787ac7e 100644
+--- a/server/integration/remedy-routes.test.ts
++++ b/server/integration/remedy-routes.test.ts
+@@ -41,6 +41,7 @@ let readinessOverride: any = null;
+ let observedVerified: number | undefined;
+ let holdScan: (() => Promise<void>) | undefined;
+ let holdWrite: (() => Promise<void>) | undefined;
++let holdStatus: (() => Promise<void>) | undefined;
+ let holdTOC: (() => Promise<void>) | undefined;
+ let tocCalls = 0;
+ let tocURL = page, tocPageID = '123', tocTitle = 'Imported title';
+@@ -91,8 +92,9 @@ before(async () => {
+     if (req.url === '/v1/cxone/health') { if(readinessOverride?.ok===false)res.statusCode=503; assert.equal(req.headers['x-api-key'], 'synthetic_not_real'); res.setHeader('Content-Type','application/json'); return res.end(JSON.stringify(readinessOverride || { ok: true, state: "ready", capabilities: { scan: true, preview: true, mutate: true, operation_status: operationReady } })); }
+     calls.push({ path: req.url!, body });
+     if (rejectAction) { res.writeHead(503); return res.end(JSON.stringify({ detail: 'Rejected key synthetic_not_real at private-engine.example.invalid' })); }
+-    if (req.url?.endsWith('/scan')) { if (scanFails) { res.writeHead(503); return res.end(JSON.stringify({ detail: 'Synthetic scanner offline' })); } const captured = scan(); if (holdScan) { const hold = holdScan; holdScan = undefined; await hold(); } res.setHeader('Content-Type','application/json'); return res.end(JSON.stringify(captured)); }
++    if (req.url?.endsWith('/scan')) { if (scanFails) { res.writeHead(503); return res.end(JSON.stringify({ detail: 'Synthetic scanner offline' })); } const captured = {...scan(),page_path:decodeURIComponent(new URL(body.page_url).pathname).slice(1)}; if (holdScan) { const hold = holdScan; holdScan = undefined; await hold(); } res.setHeader('Content-Type','application/json'); return res.end(JSON.stringify(captured)); }
+     if (req.url?.endsWith('/operation-status')) {
++      if(holdStatus)await holdStatus();
+       const known = operations.get(body.issuer + ':' + body.jti);
+       res.setHeader('Content-Type','application/json'); if (!known) { res.writeHead(404); return res.end(JSON.stringify({ error: 'operation_not_found' })); }
+       return res.end(JSON.stringify(known));
+@@ -121,7 +123,7 @@ before(async () => {
+     }
+     const before = changed ? '<p>after</p>' : '<p>before</p>', after = '<p>after</p>', token = randomUUID();
+     const restore = req.url?.endsWith('/restore-preview');
+-    const binding = { action: restore ? 'cxone.restore' : 'cxone.apply', target: { hostname: 'dev.libretexts.org', page_id: invalidBinding ? '999' : '123', page_path: 'Sandboxes/johnnyphung/Conductor_test' },
++    const binding = { action: restore ? 'cxone.restore' : 'cxone.apply', target: { hostname: 'dev.libretexts.org', page_id: invalidBinding ? '999' : '123', page_path: decodeURIComponent(new URL(body.page_url).pathname).slice(1) },
+       preview_token: token, before_sha256: createHash('sha256').update(before).digest('hex'), after_sha256: createHash('sha256').update(after).digest('hex'),
+       fix_mode: restore ? 'restore' : body.fix_mode || 'deterministic', tier: !restore && body.fix_mode === 'pipeline' ? body.tier : null,
+       snapshot: restore ? { timestamp: '2026-10-29T00:00:00.000Z', sha256: createHash('sha256').update(after).digest('hex') } : null };
+@@ -144,7 +146,7 @@ beforeEach(async () => {
+   Object.assign(process.env, { REMEDY_REVIEWER_KEY_ENABLED: 'true', REMEDY_REVIEWER_KEY_ID: 'synthetic-generated-key', REMEDY_REVIEWER_ISSUER: 'urn:conductor:test', REMEDY_REVIEWER_AUDIENCE: 'urn:bridge:test', REMEDY_REVIEWER_SIGNING_KEY_FILE: keyPath,
+     REMEDY_REVIEWER_KEY_NOT_BEFORE: String(Math.floor(Date.now()/1000)-60), REMEDY_REVIEWER_KEY_NOT_AFTER: String(Math.floor(Date.now()/1000)+3600) });
+   await User.updateMany({uuid:{$in:Object.values(users)}},{$set:{roles:[{org:'libretexts',role:'user'}]}});
+-  readinessOverride = null; previewExpiry = 0; invalidBinding = false; operationReady = true; previews.clear(); operations.clear();
++  holdStatus=undefined; readinessOverride = null; previewExpiry = 0; invalidBinding = false; operationReady = true; previews.clear(); operations.clear();
+   await Project.deleteMany({ projectID });
+   await mongoose.connection.db!.collection('conformancerecords').deleteMany({ projectID });
+   await mongoose.connection.db!.collection('remedyoperationrecords').deleteMany({ projectID });
+@@ -1152,3 +1154,11 @@ test('revoked terminal resolver permission and changed project membership cannot
+   release();assert.ok([403,409].includes((await pending).status));assert.equal((await Project.findOne({projectID}).lean())!.a11yReview[0].remedyWritePending,true);
+  }
+ });
++
++test('a current admin role is required after post-preparation proof revalidation',async()=>{
++ const f=await terminalPending();let observations=0,release!:()=>void,started!:()=>void;const held=new Promise<void>(r=>release=r),entered=new Promise<void>(r=>started=r);
++ holdStatus=async()=>{if(++observations===3){started();await held;}};
++ const pending=request(f.path+'/resolve','POST',f.body,'auditor');await entered;
++ await User.updateOne({uuid:users.auditor},{$set:{roles:[{org:'libretexts',role:'user'}]}});release();assert.equal((await pending).status,403);
++ assert.equal((await Project.findOne({projectID}).lean())!.a11yReview[0].remedyWritePending,true);
++});
+-- 
+2.54.0 (Apple Git-157)
+

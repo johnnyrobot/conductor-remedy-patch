@@ -1,0 +1,56 @@
+{
+  "bridgeCommit": "03d961d7fbfbcc36bad885f5ec06d5f289cba09e",
+  "serverCommit": "3fa8ed592bbe41f1f1a9adab4888dfaa1a9e2d71",
+  "contract": "cxone-terminal-v1",
+  "syntheticExternalOnly": true,
+  "normalJWTSessionMongo": true,
+  "lostReplyAndRestart": true,
+  "historicalRecoveryWithoutSigner": true,
+  "nonAsciiBinding": true,
+  "transportTamperHeld": true,
+  "unreadableActualStoreHeld": true,
+  "lookupAndRecoveryBridgeDBFenceBytesUnchanged": true,
+  "originalExternalWritesThisRun": 2,
+  "totalWritesIncludingRetainedSetup": 3,
+  "recoveryMutationRetries": 0,
+  "cases": [
+    {
+      "kind": "audit-false-lost-id",
+      "outcome": "known_success",
+      "reason": null,
+      "auditRecorded": false,
+      "learnedOperationID": "d9754589-e0a7-4272-8394-ed6ad70cb2d4",
+      "originalHistoryPreserved": true,
+      "conformancePending": true
+    },
+    {
+      "kind": "noop-lost-id",
+      "outcome": "not_attempted",
+      "reason": "no_change",
+      "auditRecorded": null,
+      "learnedOperationID": "a0e4fc9b-4172-4f9c-a95e-67dafb6455fc",
+      "originalHistoryPreserved": true,
+      "conformancePending": true
+    },
+    {
+      "kind": "known-id-storage-failure",
+      "outcome": "known_success",
+      "reason": null,
+      "auditRecorded": false,
+      "learnedOperationID": "a2e54c84-c283-4c55-9def-5fc5e5455a79",
+      "originalHistoryPreserved": true,
+      "conformancePending": true
+    },
+    {
+      "kind": "stale-preview-lost-id",
+      "outcome": "not_attempted",
+      "reason": "stale_preview",
+      "auditRecorded": null,
+      "learnedOperationID": "d899feeb-5b97-4d54-bd46-3cc3694a38fb",
+      "originalHistoryPreserved": true,
+      "conformancePending": true
+    }
+  ],
+  "finalCodeRecoveryWithPostProofRoleCheck": true,
+  "additionalRetainedSetupClaimExplicitlyRecovered": true
+}

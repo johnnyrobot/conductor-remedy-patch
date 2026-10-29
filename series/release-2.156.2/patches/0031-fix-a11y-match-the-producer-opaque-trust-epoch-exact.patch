@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: johnnyrobot <174211481+johnnyrobot@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 14:55:05 -0700
+Subject: [PATCH] fix(a11y): match the producer opaque trust epoch exactly
+ (LT-180)
+
+---
+ docs/remedy-terminal-recovery.md        | 5 ++---
+ server/util/remedyTerminalProof.test.ts | 4 ++++
+ server/util/remedyTerminalProof.ts      | 2 +-
+ 3 files changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/docs/remedy-terminal-recovery.md b/docs/remedy-terminal-recovery.md
+index c53739c2..99e7ea29 100644
+--- a/docs/remedy-terminal-recovery.md
++++ b/docs/remedy-terminal-recovery.md
+@@ -19,9 +19,8 @@ issuer/nonce/target/proof fields.
+ Conductor additionally needs **`REMEDY_REVIEWER_TRUST_EPOCH`** for terminal-proof
+ recovery. This is a non-secret configuration value, separate from the seven
+ signer settings: use the exact coordinated Bridge ledger/fence epoch, never a
+-value learned from a response or a guessed default. This consumer accepts a
+-nonempty value up to512 UTF-16 code units with no surrounding whitespace or
+-ASCII control characters. Missing/invalid configuration disables only this
++value learned from a response or a guessed default. Treat this as the same opaque nonempty string used by Bridge; no trimming,
++normalization or value learned from the response is substituted. Missing/invalid configuration disables only this
+ terminal-proof path with a useful error. Ordinary startup/scan/preview and the
+ existing unknown-outcome operator-resolution path remain available. No signing
+ key is needed for historical recovery.
+diff --git a/server/util/remedyTerminalProof.test.ts b/server/util/remedyTerminalProof.test.ts
+index 40abf740..53d1ec79 100644
+--- a/server/util/remedyTerminalProof.test.ts
++++ b/server/util/remedyTerminalProof.test.ts
+@@ -31,3 +31,7 @@ test('known response ID is enforced but a lost reply may learn the trusted proof
+  process.env.REMEDY_REVIEWER_TRUST_EPOCH='synthetic-terminal-epoch';const raw=fixture.statuses[1].body;
+  assert.ok(checkedRecoveryStatus(raw,intent).terminalProof);assert.throws(()=>checkedRecoveryStatus(raw,intent,'00000000-0000-4000-8000-000000000002'));
+ });
++
++test('configured epoch is the exact opaque producer identifier, without invented format restrictions',()=>{
++ for(const epoch of ['epoch-Ω-🙂','  opaque epoch  ','x'.repeat(513)]){process.env.REMEDY_REVIEWER_TRUST_EPOCH=epoch;const raw=structuredClone(fixture.statuses[0].body);raw.terminal_proof.trust_epoch=epoch;assert.ok(checkedRecoveryStatus(raw,intent).terminalProof);}
++});
+diff --git a/server/util/remedyTerminalProof.ts b/server/util/remedyTerminalProof.ts
+index 6bdade6d..c5cb4fab 100644
+--- a/server/util/remedyTerminalProof.ts
++++ b/server/util/remedyTerminalProof.ts
+@@ -18,7 +18,7 @@ export const terminalBindingHash=(binding:unknown)=>createHash('sha256').update(
+ 
+ function expectedEpoch(){
+  const value=process.env.REMEDY_REVIEWER_TRUST_EPOCH;
+- if(!value||value!==value.trim()||value.length>512||/[\x00-\x1f\x7f]/.test(value))
++ if(!value)
+   throw reviewError('Terminal-proof recovery requires REMEDY_REVIEWER_TRUST_EPOCH to match the coordinated Bridge epoch. Scan, preview and separate unknown-outcome recovery remain available.',503);
+  return value;
+ }
+-- 
+2.54.0 (Apple Git-157)
+

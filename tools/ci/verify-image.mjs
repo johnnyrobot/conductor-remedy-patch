@@ -125,7 +125,7 @@ try {
   };
   function writeConfig(mode) {
     const db =
-        mode === "review-only" ? "conductor_test_runtime_review" : mode === "off"
+        mode.startsWith("terminal-") ? "conductor_test_runtime_terminal" : mode === "review-only" ? "conductor_test_runtime_review" : mode === "off"
           ? "conductor_test_runtime_off"
           : "conductor_test_runtime_enabled",
       mongoURI = "mongodb://mongo:27017/" + db,
@@ -145,7 +145,8 @@ try {
             REMEDY_ORG_ID: "libretexts",
             REMEDY_API_BASE_URL: "https://engine:8443",
             REMEDY_API_KEY: config.key,
-            ...(mode === "review-only" ? {} : {
+            ...(mode === "terminal-recover" ? {REMEDY_REVIEWER_TRUST_EPOCH:"ci-terminal-epoch"} : {}),
+            ...(mode === "review-only" || mode === "terminal-recover" ? {} : {
             REMEDY_REVIEWER_KEY_ENABLED: mode === "recover" ? "false" : "true",
             REMEDY_REVIEWER_SIGNING_KEY_FILE: "/fixture/signer.pem",
             REMEDY_REVIEWER_KEY_ID: config.kid,
@@ -310,6 +311,8 @@ try {
   await appPhase("enabled");
   await appPhase("recover");
   await appPhase("review-only");
+  await appPhase("terminal-write");
+  await appPhase("terminal-recover");
   report.passed = true;
 } catch (error) {
   report.passed = false;

@@ -9,15 +9,15 @@ const root = "/fixture",
   criteria = JSON.parse(fs.readFileSync(root + "/criteria.json")),
   client = new MongoClient(config.mongoURI);
 await client.connect();
-const db = client.db();
+let db = client.db();
 const hash = (text) => createHash("sha256").update(text).digest("hex"),
   previews = new Map(),
-  operations = new Map();
+  operations = new Map(), terminalBindings = new Map();
 let html = "<p><strong>Chapter</strong></p>",
   mode = "success",
   writes = 0,
   calls = 0,
-  scanCalls = 0, reviewOnly = false;
+  scanCalls = 0, reviewOnly = false, historicalStatus = false;
 const metadata = (outcome, operationID = randomUUID()) => ({
   operation_id: operationID,
   action: "cxone.apply",
@@ -51,7 +51,9 @@ const server = https.createServer(
       const body = raw ? JSON.parse(raw) : {};
       if (req.url === "/control") {
         if (body.mode) mode = body.mode;
+        if (body.terminalDatabase) db=client.db("conductor_test_runtime_terminal");
         if (body.reviewOnly !== undefined) reviewOnly = body.reviewOnly;
+        if (body.historicalStatus !== undefined) historicalStatus = body.historicalStatus;
         if (body.resetHeading) html = "<p><strong>Chapter</strong></p>";
         if (body.resolve) {
           const value = operations.get(body.resolve);
@@ -83,7 +85,7 @@ const server = https.createServer(
               scan: true,
               preview: true,
               mutate: !reviewOnly,
-              operation_status: !reviewOnly,
+              operation_status: !reviewOnly || historicalStatus,
             },
           }),
         );
@@ -167,7 +169,14 @@ const server = https.createServer(
           res.statusCode = 404;
           return res.end(JSON.stringify({ err: true }));
         }
-        return res.end(JSON.stringify(result));
+        let proof=null;
+        if(['known_success','not_attempted'].includes(result.outcome)){
+          const original=terminalBindings.get(body.issuer+':'+body.jti);
+          // Independent ASCII-only protocol adapter; Unicode is checked against Python fixtures and actual Bridge.
+          const sorted=value=>value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,sorted(value[key])])):value;
+          proof={contract:'cxone-terminal-v1',issuer:body.issuer,jti:body.jti,operation_id:result.operation_id,action:result.action,target:{hostname:original.target.hostname,page_id:original.target.page_id},binding_sha256:hash(JSON.stringify(sorted(original))),outcome:result.outcome,reason:result.reason,audit_recorded:result.audit_recorded,state:'terminal',terminal_updated_at:result.updated_at,trust_epoch:'ci-terminal-epoch',durability_seq:7};
+        }
+        return res.end(JSON.stringify({...result,terminal_proof:proof}));
       }
       if (req.url === "/v1/cxone/page/apply-fix") {
         const preview = previews.get(body.preview_token);
@@ -213,7 +222,10 @@ const server = https.createServer(
         const result = metadata(
           mode === "unknown" ? "unknown_write" : "known_success",
         );
+        if(mode === "lost-terminal")result.audit_recorded=false;
         operations.set(claims.iss + ":" + claims.jti, result);
+        terminalBindings.set(claims.iss+":"+claims.jti,claims.binding);
+        if(mode === "lost-terminal"){res.destroy();return;}
         return res.end(JSON.stringify(result));
       }
       res.statusCode = 404;
