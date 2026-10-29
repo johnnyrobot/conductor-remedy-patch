@@ -1,0 +1,104 @@
+[
+  {
+    "stepIndex": 1,
+    "action": "navigate",
+    "description": "Navigate to http://127.0.0.1:41757",
+    "status": "passed"
+  },
+  {
+    "stepIndex": 2,
+    "action": "fill",
+    "description": "Fill 'editor@lt157-fullstack.example.invalid' into Email email field",
+    "status": "passed"
+  },
+  {
+    "stepIndex": 3,
+    "action": "fill",
+    "description": "Fill '<redacted>' into ******** password field",
+    "status": "passed"
+  },
+  {
+    "stepIndex": 4,
+    "action": "click",
+    "description": "Click 'Login button'",
+    "status": "passed"
+  },
+  {
+    "stepIndex": 5,
+    "action": "click",
+    "description": "Click 'Add work from a page review'",
+    "status": "passed"
+  },
+  {
+    "stepIndex": 6,
+    "action": "select",
+    "description": "Select option in 'Choose a page Synthetic article dropdown'",
+    "status": "passed"
+  },
+  {
+    "stepIndex": 7,
+    "action": "click",
+    "description": "Click 'checkbox'",
+    "status": "passed"
+  },
+  {
+    "stepIndex": 8,
+    "action": "click",
+    "description": "Click 'Add selected ( 1 ) button'",
+    "status": "passed"
+  },
+  {
+    "stepIndex": 9,
+    "action": "click",
+    "description": "Click 'Edit work item'",
+    "status": "passed"
+  },
+  {
+    "stepIndex": 10,
+    "action": "select",
+    "description": "Select option in 'To do In progress Needs review Verified Blocked dropdown'",
+    "status": "passed"
+  },
+  {
+    "stepIndex": 11,
+    "action": "fill",
+    "description": "Fill 'Synthetic manual check completed; original and output descriptions compared.' into Record the proposed approach, review, or manual... text area",
+    "status": "passed"
+  },
+  {
+    "stepIndex": 12,
+    "action": "click",
+    "description": "Click 'Save work item button'",
+    "status": "passed"
+  },
+  {
+    "stepIndex": 13,
+    "action": "select",
+    "description": "Select option in 'All open items All items To do In progress Needs... dropdown'",
+    "status": "passed"
+  },
+  {
+    "stepIndex": 14,
+    "action": "click",
+    "description": "Click 'Refresh queue button'",
+    "status": "passed"
+  },
+  {
+    "stepIndex": 15,
+    "action": "click",
+    "description": "Click 'History'",
+    "status": "passed"
+  },
+  {
+    "stepIndex": 16,
+    "action": "visible",
+    "description": "Exactly one Synthetic article criterion 1.1.1 work item persisted as Verified, with the submitted note in its history.",
+    "status": "passed"
+  },
+  {
+    "stepIndex": 17,
+    "action": "visible",
+    "description": "WCAG conformance remains pending, with no conformance criteria verified.",
+    "status": "passed"
+  }
+]

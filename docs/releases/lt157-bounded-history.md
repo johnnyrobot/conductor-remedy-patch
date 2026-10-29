@@ -69,9 +69,31 @@ pass. First native Standards/Spec/Correctness review found no critical/major
 defects. Two minors (duplicate-ID pagination and mounted continuation coverage)
 are fixed; four broader upstream API/frontend convention migrations are tracked
 in LT-167. The scoped second review and single CodeRabbit/fallback outcome are
-recorded in the PR. The one approved
-actual-service signed TestSprite A plus existing C pair is pending; no paid B
-retry or weak-assertion certification is authorized.
+recorded in the PR. The approved actual-service TestSprite pair passed:
+
+| Flow | Run | Recorded result |
+|---|---|---|
+| Signed deterministic heading apply/rescan (A) | `29567d92-a584-42b0-a3ea-e9d0c1705ade` |14/14 steps; explicit successful write, corrected finding and pending human conformance assertions |
+| Existing note/history flow (C) | `86ec6117-08a0-46b7-957f-dab1fb67ccaa` |17/17 steps; persisted single verified work item/note and pending WCAG assertions |
+
+A's pinned pre-ack and pre-apply HTML snapshots independently show the actual
+bold-to-h3 diff and disabled-before/enabled-after acknowledgement gate. The
+recorded final assertions have concrete subjects, not a bare visible-element
+claim. Supplemental actual API/Mongo/Bridge SQLite evidence proves exactly one
+external fake-CXone write, the verified reviewer/operation match, immutable local
+history after status reads and zero human-verified criteria. C uses a controlled
+stored manual-task starting state, not a fabricated engine result; it does not
+certify scanning. A runs real product services: Bridge60be7d0 and Server3fa8ed5,
+with only the external CXone adapter replaced and non-fixture egress denied.
+
+Exactly1credit was spent (0.5 per run; CLI balance484.3→483.3). No B run/retry or
+second paid attempt was made. The existing environment was restored to its prior
+local URL with credentials cleared. Owned tunnels ended with their runs; the
+local services remain only for the subsequent LT-127 synthetic HTTP work and
+will be cleaned afterward. Sanitized run/step/ledger observations are in the
+[evidence directory](evidence/lt157); private keys, login credentials and signed
+artifact URLs are excluded. These are macOS development tests, not Linux/live
+provider/production CAS approval.
 
 LT-148 documentation is included: top-level README names all seven signer
 settings, read-only recovery remains available without a local signer, and

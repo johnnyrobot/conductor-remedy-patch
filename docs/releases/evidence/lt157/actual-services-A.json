@@ -1,0 +1,15 @@
+{
+  "synthetic": true,
+  "actualServices": true,
+  "bridgeCommit": "60be7d08525ee291ebfb2e648e7d376f0acde609",
+  "serverCommit": "3fa8ed592bbe41f1f1a9adab4888dfaa1a9e2d71",
+  "externalWrites": 1,
+  "durableIntentAndResponseObserved": true,
+  "ledgerRows": 1,
+  "operationIDMatches": true,
+  "verifiedReviewerMatches": true,
+  "knownSuccess": true,
+  "readOnlyStatusPreservedHistory": true,
+  "humanVerifiedCriteria": 0,
+  "conformance": "verification_pending"
+}

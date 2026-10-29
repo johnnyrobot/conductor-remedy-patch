@@ -1,0 +1,86 @@
+[
+  {
+    "stepIndex": 1,
+    "action": "navigate",
+    "description": "Navigate to http://127.0.0.1:41757",
+    "status": "passed"
+  },
+  {
+    "stepIndex": 2,
+    "action": "fill",
+    "description": "Fill 'editor@lt157-fullstack.example.invalid' into Email email field",
+    "status": "passed"
+  },
+  {
+    "stepIndex": 3,
+    "action": "fill",
+    "description": "Fill '<redacted>' into ******** password field",
+    "status": "passed"
+  },
+  {
+    "stepIndex": 4,
+    "action": "click",
+    "description": "Click 'Login button'",
+    "status": "passed"
+  },
+  {
+    "stepIndex": 5,
+    "action": "click",
+    "description": "Click 'Choose a page to fix or restore Synthetic article dropdown'",
+    "status": "passed"
+  },
+  {
+    "stepIndex": 6,
+    "action": "select",
+    "description": "Select option in 'Choose a page to fix or restore Synthetic article dropdown'",
+    "status": "passed"
+  },
+  {
+    "stepIndex": 7,
+    "action": "click",
+    "description": "Click 'Rescan page button'",
+    "status": "passed"
+  },
+  {
+    "stepIndex": 8,
+    "action": "click",
+    "description": "Click 'checkbox'",
+    "status": "passed"
+  },
+  {
+    "stepIndex": 9,
+    "action": "click",
+    "description": "Click 'Preview selected fix button'",
+    "status": "passed"
+  },
+  {
+    "stepIndex": 10,
+    "action": "click",
+    "description": "Click 'checkbox'",
+    "status": "passed"
+  },
+  {
+    "stepIndex": 11,
+    "action": "click",
+    "description": "Click 'Apply reviewed fix and rescan button'",
+    "status": "passed"
+  },
+  {
+    "stepIndex": 12,
+    "action": "visible",
+    "description": "The apply-and-rescan operation completed successfully.",
+    "status": "passed"
+  },
+  {
+    "stepIndex": 13,
+    "action": "visible",
+    "description": "The refreshed scan shows no fixable findings and zero failed criteria.",
+    "status": "passed"
+  },
+  {
+    "stepIndex": 14,
+    "action": "visible",
+    "description": "Conformance remains verification pending, with zero criteria verified.",
+    "status": "passed"
+  }
+]
