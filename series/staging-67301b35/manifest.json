@@ -4,9 +4,9 @@
   "role": "primary",
   "upstreamRepository": "https://github.com/LibreTexts/conductor.git",
   "baseCommit": "67301b35c3784ed73ba1a65011ef5a1d689abca1",
-  "expectedTree": "fcfb5e47581bf08ff89747f9e0d5527efcc0ab3e",
+  "expectedTree": "21dc9f021c64afeea6f507e9595d83581062a77a",
   "upstreamPackageVersion": "2.156.2",
-  "sourceCommit": "f3951cc0697b9b73676e765205f8b90c0876576b",
+  "sourceCommit": "128a8698d152acaa52160d961bf65abdb8065b6e",
   "patches": [
     {
       "path": "patches/0001-feat-a11y-carry-CXone-pageID-on-review-sections-extr.patch",
@@ -119,6 +119,14 @@
     {
       "path": "patches/0028-fix-a11y-retry-review-reads-through-matrix-and-stand.patch",
       "sha256": "bae9bd331668fe94dd62153143506d97d0daa040473423bf019d5af301d93421"
+    },
+    {
+      "path": "patches/0029-feat-a11y-recover-pending-writes-from-trusted-termin.patch",
+      "sha256": "92ea76c5229b4695cbe5e9dfbf9151b52abe48d83adeed71edcee0f40596ba6e"
+    },
+    {
+      "path": "patches/0030-fix-a11y-recheck-resolver-authority-at-terminal-proo.patch",
+      "sha256": "2067c50e87db2e0196022afdde54a3da1e5a64657e5e481a90582d577dcf10bf"
     }
   ],
   "upstreamScripts": {
@@ -224,5 +232,16 @@
     "serverCommitTested": "3fa8ed592bbe41f1f1a9adab4888dfaa1a9e2d71",
     "optionalReviewOnly": true,
     "productionWriteEnablementVerified": false
+  },
+  "terminalProofRecoveryImplemented": true,
+  "terminalProofContract": {
+    "contract": "cxone-terminal-v1",
+    "bridgeCommit": "03d961d7fbfbcc36bad885f5ec06d5f289cba09e",
+    "fixtureVersion": "cxone-terminal-v1-fixtures-r1",
+    "bindingFixtureSHA256": "be1b286ded8462208d282a6f4e711dee95d0be5235d12ed901b88a1a600499ab",
+    "expectedEpochVariable": "REMEDY_REVIEWER_TRUST_EPOCH",
+    "configurationDefault": null,
+    "automaticUnlock": false,
+    "remoteRetry": false
   }
 }

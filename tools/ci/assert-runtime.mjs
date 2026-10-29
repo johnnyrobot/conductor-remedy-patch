@@ -20,7 +20,7 @@ const client = new MongoClient(config.mongoURI);
 await client.connect();
 const db = client.db(),
   cookies = {};
-if (phase !== "recover") {
+if (phase !== "recover" && phase !== "terminal-recover") {
   for (const [name, uuid] of Object.entries({
     editor: config.editor,
     auditor: config.auditor,
@@ -149,6 +149,8 @@ assert.equal(
   "ordinary authenticated project access",
 );
 if (phase === "review-only") await control({reviewOnly:true,resetHeading:true});
+if (phase === "terminal-write") await control({reviewOnly:false,resetHeading:true,mode:"lost-terminal",terminalDatabase:true});
+if (phase === "terminal-recover") await control({reviewOnly:true,historicalStatus:true});
 const readiness = await request(
   matrix + "/health?projectID=" + config.projectID,
 );
@@ -366,12 +368,31 @@ if (phase === "off") {
   for(const path of [matrix+"/apply",base+"/page/"+config.sectionID+"/apply",base+"/page/"+config.sectionID+"/restore"]){
     const response=await request(path,"POST",{...input,localReviewID:preview.data.localReviewID,previewToken:preview.data.preview_token,previewHash:preview.data.preview_hash,confirmed:true});
     assert.equal(response.status,503,JSON.stringify(response.data));
+    assert.match(response.data.errMsg,/automatic edits.*unavailable/i);
   }
   assert.deepEqual(await db.collection("projects").findOne({projectID:config.projectID}),original);
   assert.equal(await db.collection("remedyoperationrecords").countDocuments({projectID:config.projectID}),0);
   assert.equal((await control()).writes,before);
   assert.equal((await request(base+"/conformance")).data.report.verifiedCriteria,0);
   observation={...observation,reviewOnlyWithoutSigner:true,scanAndPreview:true,craftedWritesDenied:true,noIntentOrPreviewConsumption:true,externalMutationDelta:0,humanVerifiedCriteria:0};
+ } else if (phase === "terminal-write") {
+  assert.equal(readiness.data.available,true);
+  const preview=await request(matrix+"/preview","POST",input);assert.equal(preview.status,200);
+  const write=await request(matrix+"/apply","POST",{...input,confirmed:true,localReviewID:preview.data.localReviewID,previewToken:preview.data.preview_token,previewHash:preview.data.preview_hash});assert.equal(write.status,502);
+  await db.collection("users").updateOne({uuid:config.auditor},{$set:{roles:[{org:"libretexts",role:"support"}]}});
+  const project=await db.collection("projects").findOne({projectID:config.projectID});
+  const path=base+"/page/"+config.sectionID+"/operations/"+write.data.localOperationID;
+  const looked=await request(path,"GET",undefined,"auditor");assert.equal(looked.data.pending,true);assert.equal(looked.data.operation.outcome,"known_success");assert.equal(looked.data.operation.audit_recorded,false);
+  const response=await request(path+"/resolve","POST",{expectedVersion:project.a11yReview[0].remedyEvidenceVersion,confirmed:true,reason:"Synthetic support cannot consume terminal proof without configured expected trust epoch."},"auditor");assert.equal(response.status,503);assert.match(response.data.errMsg,/TRUST_EPOCH/);
+  observation={...observation,lostReplyBeforeID:true,terminalEpochMissingHeld:true,auditFalsePreserved:true};
+} else if (phase === "terminal-recover") {
+  assert.equal(readiness.data.available,true);assert.equal(readiness.data.capabilities.mutate,false);assert.equal(readiness.data.capabilities.operation_status,true);assert.equal(process.env.REMEDY_REVIEWER_SIGNING_KEY_FILE,undefined);
+  const project=await db.collection("projects").findOne({projectID:config.projectID}),localID=project.a11yReview[0].remedyPendingOperation,path=base+"/page/"+config.sectionID+"/operations/"+localID;
+  const original=await db.collection("remedyoperationrecords").find({projectID:config.projectID}).sort({_id:1}).toArray(),before=(await control()).writes;
+  const looked=await request(path,"GET",undefined,"auditor");assert.equal(looked.data.pending,true);
+  const response=await request(path+"/resolve","POST",{expectedVersion:project.a11yReview[0].remedyEvidenceVersion,confirmed:true,reason:"Synthetic support consumes trusted terminal proof and a fresh scan without retrying any write."},"auditor");assert.equal(response.status,200,JSON.stringify(response.data));assert.equal(response.data.operation.audit_recorded,false);
+  const after=await db.collection("projects").findOne({projectID:config.projectID}),records=await db.collection("remedyoperationrecords").find({projectID:config.projectID}).sort({_id:1}).toArray();assert.deepEqual(records.slice(0,original.length),original);assert.equal(after.a11yReview[0].remedyWritePending,false);assert.equal(after.remedyResolutionCommits[0].operationID,response.data.operation.operation_id);assert.equal(records.at(-1).event.terminalProof.contract,"cxone-terminal-v1");assert.equal((await control()).writes,before);assert.equal((await request(base+"/conformance")).data.report.verifiedCriteria,0);
+  observation={...observation,terminalProofRecoveredWithoutSigner:true,originalHistoryPreserved:true,readOnlyLookupHeld:true,auditFalsePreserved:true,remoteMutationRetries:0,humanVerifiedCriteria:0};
 } else throw Error("Unknown fixture phase");
 await client.close();
 process.stdout.write(JSON.stringify(observation) + "\n");

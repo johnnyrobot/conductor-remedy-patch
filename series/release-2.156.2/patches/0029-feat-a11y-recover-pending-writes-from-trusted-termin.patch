@@ -1,0 +1,508 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: johnnyrobot <174211481+johnnyrobot@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 14:28:52 -0700
+Subject: [PATCH 29/30] feat(a11y): recover pending writes from trusted
+ terminal proof (LT-180)
+
+---
+ client/src/remediation-queue-entry.test.tsx   |  11 ++
+ client/src/remediation-queue-entry.tsx        |   6 +-
+ server/api/services/remedy-recovery.ts        |  27 ++--
+ .../fixtures/cxone-terminal-v1-fixtures.json  | 101 +++++++++++++++
+ .../fixtures/terminal-digest-vectors.json     |  38 ++++++
+ server/integration/remedy-routes.test.ts      | 116 +++++++++++++++++-
+ server/util/remedyTerminalProof.test.ts       |  33 +++++
+ server/util/remedyTerminalProof.ts            |  56 +++++++++
+ 8 files changed, 374 insertions(+), 14 deletions(-)
+ create mode 100644 client/src/remediation-queue-entry.test.tsx
+ create mode 100644 server/integration/fixtures/cxone-terminal-v1-fixtures.json
+ create mode 100644 server/integration/fixtures/terminal-digest-vectors.json
+ create mode 100644 server/util/remedyTerminalProof.test.ts
+ create mode 100644 server/util/remedyTerminalProof.ts
+
+diff --git a/client/src/remediation-queue-entry.test.tsx b/client/src/remediation-queue-entry.test.tsx
+new file mode 100644
+index 00000000..0da9ee8e
+--- /dev/null
++++ b/client/src/remediation-queue-entry.test.tsx
+@@ -0,0 +1,11 @@
++import React,{act} from 'react';import{screen,fireEvent,waitFor}from'@testing-library/react';import{test,expect,vi}from'vitest';
++test('standalone entry keeps healthy historical lookup visible when preview/writer readiness is unavailable',async()=>{
++ window.history.replaceState({},'','/projects/fixture/accessibility');const anchor=document.createElement('section');anchor.className='wcag-summary-segment';document.body.appendChild(anchor);
++ const fetcher=vi.fn(async(url:any,_options?:RequestInit)=>({ok:true,json:async()=>String(url).includes('remedy/health')?{err:false,available:false,capabilities:{scan:true,preview:false,mutate:false,operation_status:true}}:String(url).includes('/operations/')?{err:false,pending:true,operation:{outcome:'known_success'}}:{err:false,canEdit:true,items:[],users:[],candidates:[],sections:[{id:'page1',title:'Held article',pendingOperationID:'saved-operation'}]}}));vi.stubGlobal('fetch',fetcher);
++ try{
++  await act(async()=>{await import('./remediation-queue-entry');});
++  const button=await screen.findByRole('button',{name:'Read operation evidence'});expect(screen.queryByLabelText('Page tools')).toBeNull();expect(screen.queryByRole('button',{name:'Rescan page'})).toBeNull();
++  expect(fetcher.mock.calls.some(([url])=>String(url).includes('/operations/'))).toBe(false);fireEvent.click(button);await screen.findByText(/Write confirmed.*page remains blocked/);
++  expect(fetcher.mock.calls.every(([,options])=>!options||options.method===undefined||options.method==='GET')).toBe(true);
++ }finally{window.history.replaceState({},'','/');anchor.remove();await waitFor(()=>expect(document.querySelector('.remediation-work-queue')).toBeNull());vi.unstubAllGlobals();}
++});
+diff --git a/client/src/remediation-queue-entry.tsx b/client/src/remediation-queue-entry.tsx
+index d019ce44..f970127d 100644
+--- a/client/src/remediation-queue-entry.tsx
++++ b/client/src/remediation-queue-entry.tsx
+@@ -11,8 +11,10 @@ function ScopedQueue({projectID}: {projectID: string}) {
+   const {data} = useQuery({queryKey:['remedy-capability', projectID],
+     queryFn:async()=>(await api.getProjectRemedyCapability(projectID)).data,
+     staleTime:30_000,retry:false});
+-  return <RemediationWorkQueue projectID={projectID}
+-    capabilities={data?.available || data?.readRetry ? data.capabilities : {}}
++  const readable = data?.available === true || data?.readRetry === true;
++  const recoveryOnly = !readable && data?.capabilities?.operation_status === true;
++  return <RemediationWorkQueue projectID={projectID} recoveryOnly={recoveryOnly}
++    capabilities={readable || recoveryOnly ? data?.capabilities : {}}
+     readRetry={data?.readRetry === true} />;
+ }
+ let root: Root | undefined;
+diff --git a/server/api/services/remedy-recovery.ts b/server/api/services/remedy-recovery.ts
+index 7c627ab5..cdbe3da6 100644
+--- a/server/api/services/remedy-recovery.ts
++++ b/server/api/services/remedy-recovery.ts
+@@ -1,7 +1,8 @@
++import {checkedRecoveryStatus,sameRecoveryStatus} from '../../util/remedyTerminalProof.js';
+ import {BSON} from 'mongodb';
+ import {createHash,randomUUID} from 'node:crypto';
+ import {criteria} from '../../util/conformance.js';
+-import {appendOperation,storedIntent} from '../../util/remedyOperationRecords.js';
++import {appendOperation,storedIntent,remedyOperationRecords} from '../../util/remedyOperationRecords.js';
+ import {checkedOutcome,reviewError,safeOperationMetadata} from '../../util/remedyReview.js';
+ type RecoveryInput={project:any;projectID:string;sectionID:string;localID:string;actor:string;expectedVersion:number;reason:string};
+ function currentTarget(section:any,intent:any){
+@@ -34,24 +35,30 @@ export async function resolveRemedyClaim(input:RecoveryInput,{Project,auth,bridg
+     throw reviewError('The pending claim or evidence version changed. Refresh operation evidence before continuing.');
+    if((input.project.remedyResolutionCommits?.length||0)>=1000)throw reviewError('Project resolution history reached its explicit 1,000-marker safety limit. Preserve/export it and contact the operator.');
+    const target=currentTarget(section,intent);
+-   const status=checkedOutcome(await bridge('operation-status',{issuer:intent.issuer,jti:intent.jti}),intent.action);
+-   if(!status||status.metadata.reconciliation!=='resolved'||status.metadata.requires_reconciliation!==false||status.metadata.outcome!=='unknown_write')
+-    throw reviewError('The Bridge operation has no durable administrative resolution. The local claim remains held.');
++   // Existing immutable responses can constrain an already-known remote ID.
++   const records=await remedyOperationRecords().find({projectID:input.projectID,localID:intent.localID,sectionID:input.sectionID,kind:'response'}).select('event').limit(1001).maxTimeMS(30000).lean();
++   if(records.length>1000)throw reviewError('Operation response history exceeds its recovery observation budget. Keep the claim held.');
++   const replies=[...records.map((row:any)=>row.event),...(input.project.remedyOperations||[]).filter((event:any)=>event.kind==='response'&&event.localID===intent.localID&&event.sectionID===input.sectionID)];
++   const ids=new Set<string>();const terminalReplies:any[]=[];
++   for(const reply of replies){if(reply.operation===undefined)continue;const outcome=checkedOutcome(reply.operation,intent.action);if(!outcome)throw reviewError('Stored response history is inconsistent. Keep the claim held.');ids.add(outcome.metadata.operation_id);if(outcome.terminal)terminalReplies.push(safeOperationMetadata(outcome.metadata));}
++   if(ids.size>1)throw reviewError('Stored operation identity is inconsistent. Keep the claim held.');
++   const knownID=[...ids][0];
++   const observe=async()=>{const value=checkedRecoveryStatus(await bridge('operation-status',{issuer:intent.issuer,jti:intent.jti}),intent,knownID);if(terminalReplies.some(reply=>JSON.stringify(reply)!==JSON.stringify(value.operation)))throw reviewError('Terminal status contradicts the original stored response. Keep the claim held.');return value;};
++   const status=await observe();
+    const started=Date.now();
+    // Explicit canonical read. Never send a preview, mutation or retry request.
+    const result=await bridge('scan',{...target,rendered:false,wcag_review:null,doj_exceptions:section.dojExceptions||[]});
+    const review=freshScan(result,section,intent,started);
+-   const current=checkedOutcome(await bridge('operation-status',{issuer:intent.issuer,jti:intent.jti}),intent.action);
+-   if(!current||current.metadata.reconciliation!=='resolved'||current.metadata.requires_reconciliation||current.metadata.outcome!=='unknown_write'||current.metadata.operation_id!==status.metadata.operation_id||current.metadata.updated_at!==status.metadata.updated_at)
+-    throw reviewError('The durable operation status changed or became unavailable during the scan. The claim remains held.');
++   const current=await observe();sameRecoveryStatus(status,current);
+    if(!await auth.checkHasRoleByID(input.actor,'libretexts',['support','superadmin']))throw reviewError('Administrative permission changed. The claim remains held.',403);
+    const resolutionID=randomUUID(),event={kind:'resolution',localID:intent.localID,sectionID:input.sectionID,resolutionID,
+     actor:input.actor,at:new Date(),reason:input.reason,phase:'prepared_for_local_cas',expectedVersion:input.expectedVersion,
+     originalActor:intent.actor,issuer:intent.issuer,jti:intent.jti,action:intent.action,target:intent.binding.target,
+-    operation:safeOperationMetadata(status.metadata),scanHash:createHash('sha256').update(JSON.stringify(review)).digest('hex'),scannedAt:review.scannedAt};
++    operation:status.operation,terminalProof:status.terminalProof,recoveryKind:status.recoveryKind,scanHash:createHash('sha256').update(JSON.stringify(review)).digest('hex'),scannedAt:review.scannedAt};
+    // Journal preparation before CAS; a bounded append-only marker in that same
+    // Project CAS permanently identifies the winner, even after a TOC removal.
+    await appendOperation(input.projectID,event);
++   if(status.terminalProof)sameRecoveryStatus(status,await observe());
+    const saved=await Project.updateOne({projectID:input.projectID,
+     $expr:{$and:[...['members','leads','liaisons','orgID'].map(key=>({$eq:[{$ifNull:[`$${key}`,key==='orgID'?'':[]]},{$literal:input.project[key]??(key==='orgID'?'':[])}]})),{$lt:[{$size:{$ifNull:['$remedyResolutionCommits',[]]}},1000]},{$lt:[{$bsonSize:'$$ROOT'},12*1024*1024]}]},
+     a11yReview:{$elemMatch:{_id:section._id,sectionURL:section.sectionURL,pageID:section.pageID,remedyWritePending:true,remedyPendingOperation:intent.localID,
+@@ -59,9 +66,9 @@ export async function resolveRemedyClaim(input:RecoveryInput,{Project,auth,bridg
+     {$set:{'a11yReview.$.wcagReview':review,'a11yReview.$.dojExceptions':result.doj_exceptions||result.dojExceptions||[],
+       'a11yReview.$.remedyError':'','a11yReview.$.remedyLastScannedAt':new Date(),'a11yReview.$.remedyWritePending':false,
+       'a11yReview.$.remedyResolutionEpoch':resolutionID,'a11yReview.$.remedyLastResolution':{id:resolutionID,localID:intent.localID,actor:input.actor,at:event.at,scanHash:event.scanHash}},
+-     $push:{remedyResolutionCommits:{id:resolutionID,localID:intent.localID,actor:input.actor,at:event.at,evidenceVersion:input.expectedVersion+1}},
++     $push:{remedyResolutionCommits:{id:resolutionID,localID:intent.localID,actor:input.actor,at:event.at,evidenceVersion:input.expectedVersion+1,...(status.terminalProof?{operationID:status.operation.operation_id,proofContract:'cxone-terminal-v1'}:{})}},
+      $inc:{'a11yReview.$.remedyEvidenceVersion':1},$unset:{'a11yReview.$.remedyPendingOperation':'','a11yReview.$.remedyReviewedPreview':''}},
+     {writeConcern:{w:'majority',j:true,wtimeout:10000}});
+    if(saved.acknowledged===false||saved.matchedCount!==1)throw reviewError('The page or claim changed during resolution. No conflicting evidence was overwritten.');
+-   return {resolved:true,resolutionID,localOperationID:intent.localID,evidenceVersion:input.expectedVersion+1,operation:safeOperationMetadata(status.metadata),message:'The matching local claim was resolved after a fresh scan. Human conformance remains pending.'};
++   return {resolved:true,resolutionID,localOperationID:intent.localID,evidenceVersion:input.expectedVersion+1,operation:status.operation,message:'The matching local claim was resolved after a fresh scan. Human conformance remains pending.'};
+ }
+diff --git a/server/integration/fixtures/cxone-terminal-v1-fixtures.json b/server/integration/fixtures/cxone-terminal-v1-fixtures.json
+new file mode 100644
+index 00000000..86badf94
+--- /dev/null
++++ b/server/integration/fixtures/cxone-terminal-v1-fixtures.json
+@@ -0,0 +1,101 @@
++{
++  "fixture_version": "cxone-terminal-v1-fixtures-r1",
++  "binding": {
++    "action": "cxone.apply",
++    "target": {
++      "hostname": "dev.libretexts.org",
++      "page_id": "42",
++      "page_path": "Sandboxes/johnnyphung/Chapitres/Énergie"
++    },
++    "preview_token": "00000000-0000-4000-8000-000000000001",
++    "before_sha256": "717ba4437c3162b71d8e16497e092d0178efe189c92beadc569b3675f9a57713",
++    "after_sha256": "2edcf6b287a0e85e1c3c16be4b46c4418b3ca6ae6c8a9209ac2603b200cef39b",
++    "fix_mode": "deterministic",
++    "tier": null,
++    "snapshot": null
++  },
++  "binding_canonical_json": "{\"action\":\"cxone.apply\",\"after_sha256\":\"2edcf6b287a0e85e1c3c16be4b46c4418b3ca6ae6c8a9209ac2603b200cef39b\",\"before_sha256\":\"717ba4437c3162b71d8e16497e092d0178efe189c92beadc569b3675f9a57713\",\"fix_mode\":\"deterministic\",\"preview_token\":\"00000000-0000-4000-8000-000000000001\",\"snapshot\":null,\"target\":{\"hostname\":\"dev.libretexts.org\",\"page_id\":\"42\",\"page_path\":\"Sandboxes/johnnyphung/Chapitres/\\u00c9nergie\"},\"tier\":null}",
++  "binding_sha256": "be1b286ded8462208d282a6f4e711dee95d0be5235d12ed901b88a1a600499ab",
++  "statuses": [
++    {
++      "name": "known-success-audit-failed",
++      "body": {
++        "operation_id": "00000000-0000-4000-8000-000000000001",
++        "action": "cxone.apply",
++        "outcome": "known_success",
++        "reason": null,
++        "applied": true,
++        "restored": false,
++        "audit_recorded": false,
++        "requires_reconciliation": false,
++        "reconciliation": "none",
++        "evidence_effect": "invalidate",
++        "updated_at": "2026-10-29T00:00:00.000Z",
++        "terminal_proof": {
++          "contract": "cxone-terminal-v1",
++          "issuer": "urn:conductor:synthetic",
++          "jti": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
++          "operation_id": "00000000-0000-4000-8000-000000000001",
++          "action": "cxone.apply",
++          "target": {
++            "hostname": "dev.libretexts.org",
++            "page_id": "42"
++          },
++          "binding_sha256": "be1b286ded8462208d282a6f4e711dee95d0be5235d12ed901b88a1a600499ab",
++          "outcome": "known_success",
++          "reason": null,
++          "state": "terminal",
++          "audit_recorded": false,
++          "terminal_updated_at": "2026-10-29T00:00:00.000Z",
++          "trust_epoch": "synthetic-terminal-epoch",
++          "durability_seq": 3
++        }
++      }
++    },
++    {
++      "name": "not-attempted-no-change",
++      "body": {
++        "operation_id": "00000000-0000-4000-8000-000000000001",
++        "action": "cxone.apply",
++        "outcome": "not_attempted",
++        "reason": "no_change",
++        "applied": false,
++        "restored": false,
++        "audit_recorded": null,
++        "requires_reconciliation": false,
++        "reconciliation": "none",
++        "evidence_effect": "preserve",
++        "updated_at": "2026-10-29T00:00:00.000Z",
++        "terminal_proof": {
++          "contract": "cxone-terminal-v1",
++          "issuer": "urn:conductor:synthetic",
++          "jti": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
++          "operation_id": "00000000-0000-4000-8000-000000000001",
++          "action": "cxone.apply",
++          "target": {
++            "hostname": "dev.libretexts.org",
++            "page_id": "42"
++          },
++          "binding_sha256": "be1b286ded8462208d282a6f4e711dee95d0be5235d12ed901b88a1a600499ab",
++          "outcome": "not_attempted",
++          "reason": "no_change",
++          "state": "terminal",
++          "audit_recorded": null,
++          "terminal_updated_at": "2026-10-29T00:00:00.000Z",
++          "trust_epoch": "synthetic-terminal-epoch",
++          "durability_seq": 3
++        }
++      }
++    }
++  ],
++  "held_cases": [
++    "pending:terminal_proof=null",
++    "unknown_write:terminal_proof=null (including reconciliation=resolved; use original offline resolution path)",
++    "404:operation_not_found",
++    "503:claim_store_unavailable",
++    "missing/unknown contract",
++    "issuer/jti/action/target/binding/outcome/audit/time/trust mismatch",
++    "proof changes between preparation and revalidation",
++    "proof alone without current permission, fresh scan and local CAS"
++  ]
++}
+diff --git a/server/integration/fixtures/terminal-digest-vectors.json b/server/integration/fixtures/terminal-digest-vectors.json
+new file mode 100644
+index 00000000..187c71a6
+--- /dev/null
++++ b/server/integration/fixtures/terminal-digest-vectors.json
+@@ -0,0 +1,38 @@
++[
++  {
++    "binding": {
++      "action": "cxone.apply",
++      "target": {
++        "hostname": "dev.libretexts.org",
++        "page_id": "42",
++        "page_path": "Sandboxes/johnnyphung/\u00c9nergie/\ud83d\ude42/\u007f"
++      },
++      "preview_token": "00000000-0000-4000-8000-000000000001",
++      "before_sha256": "717ba4437c3162b71d8e16497e092d0178efe189c92beadc569b3675f9a57713",
++      "after_sha256": "2edcf6b287a0e85e1c3c16be4b46c4418b3ca6ae6c8a9209ac2603b200cef39b",
++      "fix_mode": "deterministic",
++      "tier": null,
++      "snapshot": null
++    },
++    "canonical": "{\"action\":\"cxone.apply\",\"after_sha256\":\"2edcf6b287a0e85e1c3c16be4b46c4418b3ca6ae6c8a9209ac2603b200cef39b\",\"before_sha256\":\"717ba4437c3162b71d8e16497e092d0178efe189c92beadc569b3675f9a57713\",\"fix_mode\":\"deterministic\",\"preview_token\":\"00000000-0000-4000-8000-000000000001\",\"snapshot\":null,\"target\":{\"hostname\":\"dev.libretexts.org\",\"page_id\":\"42\",\"page_path\":\"Sandboxes/johnnyphung/\\u00c9nergie/\\ud83d\\ude42/\\u007f\"},\"tier\":null}",
++    "sha256": "44b4ce13d13b5aabf2e6157b015fc4e4d9c07e48e64c52d2bdcd012ed8faade2"
++  },
++  {
++    "binding": {
++      "action": "cxone.apply",
++      "target": {
++        "hostname": "dev.libretexts.org",
++        "page_id": "42",
++        "page_path": "Sandboxes/johnnyphung/\u65e5\u672c\u8a9e/\ud834\udd1e/\"\\\n"
++      },
++      "preview_token": "00000000-0000-4000-8000-000000000001",
++      "before_sha256": "717ba4437c3162b71d8e16497e092d0178efe189c92beadc569b3675f9a57713",
++      "after_sha256": "2edcf6b287a0e85e1c3c16be4b46c4418b3ca6ae6c8a9209ac2603b200cef39b",
++      "fix_mode": "deterministic",
++      "tier": null,
++      "snapshot": null
++    },
++    "canonical": "{\"action\":\"cxone.apply\",\"after_sha256\":\"2edcf6b287a0e85e1c3c16be4b46c4418b3ca6ae6c8a9209ac2603b200cef39b\",\"before_sha256\":\"717ba4437c3162b71d8e16497e092d0178efe189c92beadc569b3675f9a57713\",\"fix_mode\":\"deterministic\",\"preview_token\":\"00000000-0000-4000-8000-000000000001\",\"snapshot\":null,\"target\":{\"hostname\":\"dev.libretexts.org\",\"page_id\":\"42\",\"page_path\":\"Sandboxes/johnnyphung/\\u65e5\\u672c\\u8a9e/\\ud834\\udd1e/\\\"\\\\\\n\"},\"tier\":null}",
++    "sha256": "7520f92249a8515109f9a6e721b27cafd269cbf0fea09882eb2b3af1afcfb81d"
++  }
++]
+diff --git a/server/integration/remedy-routes.test.ts b/server/integration/remedy-routes.test.ts
+index d19441e6..94c1f5cb 100644
+--- a/server/integration/remedy-routes.test.ts
++++ b/server/integration/remedy-routes.test.ts
+@@ -897,10 +897,10 @@ test('explicit support resolution requires durable settlement and refreshes only
+  const response=await request(path,'POST',body,'auditor');assert.equal(response.status,200,JSON.stringify(response.data));
+  const after=await Project.findOne({projectID}).lean(),section=after!.a11yReview[0];
+  assert.equal(section.remedyWritePending,false);assert.equal(section.remedyPendingOperation,undefined);assert.equal(section.remedyEvidenceVersion,version+1);assert.ok(section.remedyResolutionEpoch);
+- const commit=await Project.findOne({projectID}).select('+remedyResolutionCommits').lean();assert.equal((commit as any).remedyResolutionCommits.length,1);assert.equal((commit as any).remedyResolutionCommits[0].id,response.data.resolutionID);
++ const commit=await Project.findOne({projectID}).select('+remedyResolutionCommits').lean();assert.equal((commit as any).remedyResolutionCommits.length,1);assert.equal((commit as any).remedyResolutionCommits[0].id,response.data.resolutionID);assert.equal((commit as any).remedyResolutionCommits[0].actor,users.auditor);assert.equal((commit as any).remedyResolutionCommits[0].localID,localID);assert.equal((commit as any).remedyResolutionCommits[0].evidenceVersion,version+1);
+  const exported=await request(base+'/operations/report','GET',undefined,'auditor');assert.equal(exported.status,200);for(const marker of exported.data.resolutionCommits)assert.ok(exported.data.operationHistory.some((record:any)=>record.kind==='resolution'&&record.event.resolutionID===marker.id));
+  assert.equal(calls.filter(c=>c.path.endsWith('/apply-fix')).length,1,'resolution never retries a remote mutation');
+- const events=await Records.find({projectID}).sort({_id:1}).toArray();assert.deepEqual(events.slice(0,original.length),original);assert.equal(events.filter(r=>r.kind==='resolution').length,1);
++ const events=await Records.find({projectID}).sort({_id:1}).toArray();assert.deepEqual(events.slice(0,original.length),original);assert.equal(events.filter(r=>r.kind==='resolution').length,1);const preparation=events.find(r=>r.kind==='resolution')!.event;assert.equal(preparation.actor,users.auditor);assert.equal(preparation.originalActor,intent.actor);assert.equal(preparation.localID,localID);assert.equal(preparation.expectedVersion,version);
+  assert.equal((await request(base+'/conformance')).data.report.verifiedCriteria,0,'resolution cannot revive an old human review');
+  assert.equal((await request(path,'POST',body,'auditor')).status,409,'a second resolution cannot clear another claim');
+ });
+@@ -1040,3 +1040,115 @@ test('explicit authenticated source-read retry can restore a latched review depe
+  assert.equal(calls.at(-1)!.path,'/v1/cxone/page/scan');
+  assert.equal((await request(matrix+'/apply','POST',input())).status,503);
+ });
++
++// Independent Python oracle models the producer's deployed binding digest.
++async function terminalPending(reason: string | null = null, audit = true) {
++ outcome='uncertain';const write=await request(`${matrix}/apply`,'POST',await reviewedInput());assert.equal(write.status,502);
++ const Records=mongoose.connection.db!.collection('remedyoperationrecords');
++ const intent=(await Records.findOne({projectID,localID:write.data.localOperationID,kind:'intent'}))!.event;
++ const {execFileSync}=await import('node:child_process');
++ const digest=execFileSync('python3',['-c','import sys,json,hashlib;print(hashlib.sha256(json.dumps(json.load(sys.stdin),sort_keys=True,separators=(\",\",\":\"),ensure_ascii=True).encode()).hexdigest())'],{input:JSON.stringify(intent.binding),encoding:'utf8'}).trim();
++ const key=intent.issuer+':'+intent.jti,old=operations.get(key),noop=reason!==null;
++ const status={...old,outcome:noop?'not_attempted':'known_success',reason,applied:!noop,restored:false,audit_recorded:noop?null:audit,requires_reconciliation:false,reconciliation:'none',evidence_effect:noop&&!['stale_preview','target_mismatch'].includes(reason)?'preserve':'invalidate',updated_at:new Date().toISOString()};
++ operations.set(key,{...status,terminal_proof:{contract:'cxone-terminal-v1',issuer:intent.issuer,jti:intent.jti,operation_id:status.operation_id,action:status.action,target:{hostname:intent.binding.target.hostname,page_id:intent.binding.target.page_id},binding_sha256:digest,outcome:status.outcome,reason:status.reason,audit_recorded:status.audit_recorded,state:'terminal',terminal_updated_at:status.updated_at,trust_epoch:'synthetic-terminal-epoch',durability_seq:7}});
++ process.env.REMEDY_REVIEWER_TRUST_EPOCH='synthetic-terminal-epoch';process.env.REMEDY_REVIEWER_KEY_ENABLED='false';
++ await User.updateOne({uuid:users.auditor},{$set:{roles:[{org:'libretexts',role:'support'}]}});
++ const project=await Project.findOne({projectID}).lean();
++ return {key,intent,status:operations.get(key),localID:write.data.localOperationID,path:`${base}/page/${sectionID}/operations/${write.data.localOperationID}`,body:{expectedVersion:Number(project!.a11yReview[0].remedyEvidenceVersion||0),confirmed:true,reason:'Synthetic support verified trusted terminal proof and requests a fresh canonical scan.'}};
++}
++
++test('explicit trusted terminal recovery releases lost-reply success without signer or offline outcome rewriting',async()=>{
++ const f=await terminalPending(null,false),Records=mongoose.connection.db!.collection('remedyoperationrecords');
++ const original=await Records.find({projectID}).sort({_id:1}).toArray();
++ const looked=await request(f.path,'GET',undefined,'auditor');assert.equal(looked.data.pending,true);
++ const response=await request(f.path+'/resolve','POST',f.body,'auditor');assert.equal(response.status,200,JSON.stringify(response.data));
++ const after=await Project.findOne({projectID}).select('+remedyResolutionCommits').lean();assert.equal(after!.a11yReview[0].remedyWritePending,false);
++ const marker=(after as any).remedyResolutionCommits[0];assert.equal(marker.actor,users.auditor);assert.equal(marker.localID,f.localID);assert.equal(marker.evidenceVersion,f.body.expectedVersion+1);
++ const events=await Records.find({projectID}).sort({_id:1}).toArray();assert.deepEqual(events.slice(0,original.length),original);
++ const preparation=events.at(-1)!.event;assert.equal(preparation.actor,users.auditor);assert.equal(preparation.originalActor,f.intent.actor);assert.equal(preparation.localID,f.localID);assert.equal(preparation.expectedVersion,f.body.expectedVersion);
++ assert.equal(preparation.terminalProof.audit_recorded,false);assert.equal(preparation.terminalProof.operation_id,f.status.operation_id);
++ assert.equal(calls.filter(c=>c.path.endsWith('/apply-fix')).length,1);assert.equal((await request(base+'/conformance')).data.report.verifiedCriteria,0);
++});
++
++for(const reason of ['no_change','stale_preview','target_mismatch','pre_dispatch_failure'])test(`terminal ${reason} recovery preserves original outcome and requires new human evidence`,async()=>{
++ const f=await terminalPending(reason);const response=await request(f.path+'/resolve','POST',f.body,'auditor');assert.equal(response.status,200,JSON.stringify(response.data));
++ assert.equal(response.data.operation.outcome,'not_attempted');assert.equal(response.data.operation.reason,reason);assert.equal(response.data.operation.audit_recorded,null);
++ assert.equal((await request(base+'/conformance')).data.report.verifiedCriteria,0);assert.equal(calls.filter(c=>c.path.endsWith('/apply-fix')).length,1);
++});
++
++test('terminal recovery enforces known remote identity without rewriting the original intent',async()=>{
++ const f=await terminalPending(),Records=mongoose.connection.db!.collection('remedyoperationrecords');
++ const row={projectID,localID:f.localID,sectionID,kind:'response',event:{kind:'response',localID:f.localID,sectionID,operation:{...f.status}}};delete (row.event.operation as any).terminal_proof;
++ await Records.insertOne(row);
++ const original=await Records.find({projectID}).sort({_id:1}).toArray();
++ const before=calls.length;const changed={...f.status,operation_id:randomUUID(),terminal_proof:{...f.status.terminal_proof,operation_id:''}};changed.terminal_proof.operation_id=changed.operation_id;operations.set(f.key,changed);
++ assert.equal((await request(f.path+'/resolve','POST',f.body,'auditor')).status,409);assert.equal(calls.filter(c=>c.path.endsWith('/scan')).length,0);
++ operations.set(f.key,f.status);assert.equal((await request(f.path+'/resolve','POST',f.body,'auditor')).status,200);
++ assert.deepEqual((await Records.find({projectID}).sort({_id:1}).toArray()).slice(0,original.length),original);assert.ok(calls.length>before);
++});
++
++test('missing invalid or wrong epoch disables only terminal proof recovery',async()=>{
++ const f=await terminalPending(),Records=mongoose.connection.db!.collection('remedyoperationrecords'),before=await Records.find({projectID}).toArray();
++ for(const epoch of [undefined,'',' wrong ','wrong-epoch','bad\nepoch']){
++  if(epoch===undefined)delete process.env.REMEDY_REVIEWER_TRUST_EPOCH;else process.env.REMEDY_REVIEWER_TRUST_EPOCH=epoch;
++  const response=await request(f.path+'/resolve','POST',f.body,'auditor');assert.ok([409,503].includes(response.status));
++  assert.equal((await request(f.path,'GET',undefined,'auditor')).data.pending,true);
++  assert.equal((await request(`/project?projectID=${projectID}`)).status,200);
++ }
++ assert.deepEqual(await Records.find({projectID}).toArray(),before);
++});
++
++for(const change of ['binding','target','audit','time','sequence','missing','unknown-contract','unknown-proof'])test(`tampered terminal proof ${change} stays held without preparation`,async()=>{
++ const f=await terminalPending(),Records=mongoose.connection.db!.collection('remedyoperationrecords'),before=await Records.find({projectID}).toArray(),raw=structuredClone(f.status);
++ if(change==='binding')raw.terminal_proof.binding_sha256='0'.repeat(64);
++ if(change==='target')raw.terminal_proof.target.page_id='999';
++ if(change==='audit')raw.terminal_proof.audit_recorded=false;
++ if(change==='time')raw.terminal_proof.terminal_updated_at=new Date(Date.now()+1000).toISOString();
++ if(change==='sequence')raw.terminal_proof.durability_seq=Number.MAX_SAFE_INTEGER+1;
++ if(change==='missing')raw.terminal_proof=null;
++ if(change==='unknown-contract')raw.terminal_proof.contract='future-version';
++ if(change==='unknown-proof')Object.assign(raw,{outcome:'unknown_write',applied:null,audit_recorded:null,reason:'write_outcome_unknown',requires_reconciliation:false,reconciliation:'resolved'});
++ operations.set(f.key,raw);assert.equal((await request(f.path+'/resolve','POST',f.body,'auditor')).status,409);
++ assert.equal((await Project.findOne({projectID}).lean())!.a11yReview[0].remedyWritePending,true);assert.deepEqual(await Records.find({projectID}).toArray(),before);
++});
++
++test('changed terminal store-wide sequence during scan requires a renewed explicit action',async()=>{
++ const f=await terminalPending();
++ let release!:()=>void,started!:()=>void;const held=new Promise<void>(r=>release=r),entered=new Promise<void>(r=>started=r);holdScan=async()=>{started();await held;};
++ const pending=request(f.path+'/resolve','POST',f.body,'auditor');await entered;
++ operations.set(f.key,{...f.status,terminal_proof:{...f.status.terminal_proof,durability_seq:8}});release();assert.equal((await pending).status,409);
++ assert.equal((await Project.findOne({projectID}).lean())!.a11yReview[0].remedyWritePending,true);
++ assert.equal((await request(f.path+'/resolve','POST',f.body,'auditor')).status,200,'renewed action observes the new store-wide sequence, never retries a write');
++ assert.equal(calls.filter(c=>c.path.endsWith('/apply-fix')).length,1);
++});
++
++test('terminal preparation refusal and local CAS race preserve held state and immutable history',async()=>{
++ const f=await terminalPending(),Records=mongoose.connection.db!.collection('remedyoperationrecords'),original=await Records.find({projectID}).sort({_id:1}).toArray();
++ await mongoose.connection.db!.command({collMod:'remedyoperationrecords',validator:{kind:{$ne:'resolution'}},validationLevel:'strict',validationAction:'error'});
++ try{assert.ok((await request(f.path+'/resolve','POST',f.body,'auditor')).status>=400);}finally{await mongoose.connection.db!.command({collMod:'remedyoperationrecords',validator:{}});}
++ assert.equal((await Project.findOne({projectID}).lean())!.a11yReview[0].remedyWritePending,true);
++ let release!:()=>void,started!:()=>void;const held=new Promise<void>(r=>release=r),entered=new Promise<void>(r=>started=r);holdScan=async()=>{started();await held;};
++ const pending=request(f.path+'/resolve','POST',f.body,'auditor');await entered;await Project.updateOne({projectID,'a11yReview._id':sectionID},{$inc:{'a11yReview.$.remedyEvidenceVersion':1}});release();assert.equal((await pending).status,409);
++ const after=await Records.find({projectID}).sort({_id:1}).toArray();assert.deepEqual(after.slice(0,original.length),original);assert.equal(after.at(-1)!.event.recoveryKind,'trusted_terminal');assert.equal((await Project.findOne({projectID}).lean())!.a11yReview[0].remedyWritePending,true);
++});
++
++test('terminal proof is revalidated after immutable preparation before local CAS',async()=>{
++ const f=await terminalPending(),client=mongoose.connection.getClient();
++ const listener=(event:any)=>{if(event.commandName==='insert'&&event.command.insert==='remedyoperationrecords'&&event.command.documents?.some((row:any)=>row.kind==='resolution'))operations.set(f.key,{...f.status,terminal_proof:{...f.status.terminal_proof,durability_seq:8}});};
++ client.on('commandStarted',listener);
++ try{assert.equal((await request(f.path+'/resolve','POST',f.body,'auditor')).status,409);}finally{client.off('commandStarted',listener);}
++ const project=await Project.findOne({projectID}).select('+remedyResolutionCommits').lean();assert.equal(project!.a11yReview[0].remedyWritePending,true);assert.equal(((project as any).remedyResolutionCommits||[]).length,0);
++ const records=await mongoose.connection.collection('remedyoperationrecords').find({projectID,kind:'resolution'}).toArray();assert.equal(records.length,1);assert.equal(records[0].event.terminalProof.durability_seq,7);
++});
++
++test('revoked terminal resolver permission and changed project membership cannot release pending state',async()=>{
++ const f=await terminalPending();
++ for(const change of ['role','team']){
++  await User.updateOne({uuid:users.auditor},{$set:{roles:[{org:'libretexts',role:'support'}]}});
++  let release!:()=>void,started!:()=>void;const held=new Promise<void>(r=>release=r),entered=new Promise<void>(r=>started=r);holdScan=async()=>{started();await held;};
++  const pending=request(f.path+'/resolve','POST',f.body,'auditor');await entered;
++  if(change==='role')await User.updateOne({uuid:users.auditor},{$set:{roles:[{org:'libretexts',role:'user'}]}});
++  else await Project.updateOne({projectID},{$set:{members:[]}});
++  release();assert.ok([403,409].includes((await pending).status));assert.equal((await Project.findOne({projectID}).lean())!.a11yReview[0].remedyWritePending,true);
++ }
++});
+diff --git a/server/util/remedyTerminalProof.test.ts b/server/util/remedyTerminalProof.test.ts
+new file mode 100644
+index 00000000..40abf740
+--- /dev/null
++++ b/server/util/remedyTerminalProof.test.ts
+@@ -0,0 +1,33 @@
++import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';
++import {terminalBindingJSON,terminalBindingHash,checkedRecoveryStatus,sameRecoveryStatus} from './remedyTerminalProof.js';
++const fixture=JSON.parse(readFileSync(new URL('../integration/fixtures/cxone-terminal-v1-fixtures.json',import.meta.url),'utf8'));
++const vectors=JSON.parse(readFileSync(new URL('../integration/fixtures/terminal-digest-vectors.json',import.meta.url),'utf8'));
++const intent={issuer:'urn:conductor:synthetic',jti:'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',action:'apply',binding:fixture.binding};
++test('published Python canonical bytes/digest and independently generated Unicode vectors match exactly',()=>{
++ assert.equal(fixture.fixture_version,'cxone-terminal-v1-fixtures-r1');
++ assert.equal(terminalBindingJSON(fixture.binding),fixture.binding_canonical_json);
++ assert.equal(terminalBindingHash(fixture.binding),'be1b286ded8462208d282a6f4e711dee95d0be5235d12ed901b88a1a600499ab');
++ for(const v of vectors){assert.equal(terminalBindingJSON(v.binding),v.canonical);assert.equal(terminalBindingHash(v.binding),v.sha256);}
++ assert.throws(()=>terminalBindingJSON({tier:1.5}));assert.throws(()=>terminalBindingJSON({invalid:undefined}));
++});
++test('trusted known success preserves audit false and safe store-wide sequence',()=>{
++ process.env.REMEDY_REVIEWER_TRUST_EPOCH='synthetic-terminal-epoch';
++ const status=checkedRecoveryStatus(fixture.statuses[0].body,intent);assert.equal(status.terminalProof.audit_recorded,false);assert.equal(status.terminalProof.durability_seq,3);
++ sameRecoveryStatus(status,checkedRecoveryStatus(fixture.statuses[0].body,intent));
++ const changed=structuredClone(fixture.statuses[0].body);changed.terminal_proof.durability_seq++;
++ assert.throws(()=>sameRecoveryStatus(status,checkedRecoveryStatus(changed,intent)));
++});
++for(const field of ['issuer','jti','operation_id','action','binding_sha256','outcome','reason','audit_recorded','state','terminal_updated_at','trust_epoch','durability_seq','target'])test(`terminal proof mismatch ${field} fails held`,()=>{
++ process.env.REMEDY_REVIEWER_TRUST_EPOCH='synthetic-terminal-epoch';const raw=structuredClone(fixture.statuses[0].body);
++ raw.terminal_proof[field]=field==='durability_seq'?Number.MAX_SAFE_INTEGER+1:field==='audit_recorded'?true:field==='target'?{hostname:'evil.invalid',page_id:'42'}:'forged';assert.throws(()=>checkedRecoveryStatus(raw,intent));
++});
++test('unknown resolved status keeps its separate path without epoch or terminal proof',()=>{
++ delete process.env.REMEDY_REVIEWER_TRUST_EPOCH;const raw={...fixture.statuses[0].body,outcome:'unknown_write',reason:'write_outcome_unknown',applied:null,audit_recorded:null,requires_reconciliation:false,reconciliation:'resolved',terminal_proof:null};
++ assert.equal(checkedRecoveryStatus(raw,intent).recoveryKind,'offline_operator_resolution');
++ assert.throws(()=>checkedRecoveryStatus({...raw,terminal_proof:fixture.statuses[0].body.terminal_proof},intent));
++ assert.throws(()=>checkedRecoveryStatus(fixture.statuses[0].body,intent),(error:any)=>error.status===503);
++});
++test('known response ID is enforced but a lost reply may learn the trusted proof ID',()=>{
++ process.env.REMEDY_REVIEWER_TRUST_EPOCH='synthetic-terminal-epoch';const raw=fixture.statuses[1].body;
++ assert.ok(checkedRecoveryStatus(raw,intent).terminalProof);assert.throws(()=>checkedRecoveryStatus(raw,intent,'00000000-0000-4000-8000-000000000002'));
++});
+diff --git a/server/util/remedyTerminalProof.ts b/server/util/remedyTerminalProof.ts
+new file mode 100644
+index 00000000..6bdade6d
+--- /dev/null
++++ b/server/util/remedyTerminalProof.ts
+@@ -0,0 +1,56 @@
++import {createHash} from 'node:crypto';
++import {checkedOutcome,reviewError,safeOperationMetadata} from './remedyReview.js';
++
++/** The deployed ledger uses Python ensure_ascii JSON, not JCS or raw JS JSON. */
++export function terminalBindingJSON(value: unknown): string {
++ const quote=(text:string)=>JSON.stringify(text).replace(/[\u007f-\uffff]/g,char=>'\\u'+char.charCodeAt(0).toString(16).padStart(4,'0'));
++ if(value===null)return 'null';
++ if(typeof value==='string')return quote(value);
++ if(typeof value==='number'&&Number.isSafeInteger(value))return JSON.stringify(value);
++ if(typeof value==='object'&&!Array.isArray(value)&&[Object.prototype,null].includes(Object.getPrototypeOf(value))){
++  const object=value as Record<string,unknown>,keys=Object.keys(object).sort();
++  if(keys.some(key=>/[^\x20-\x7e]/.test(key)))throw reviewError('Stored review binding is malformed. Keep the claim held.');
++  return '{'+keys.map(key=>quote(key)+':'+terminalBindingJSON(object[key])).join(',')+'}';
++ }
++ throw reviewError('Stored review binding is malformed. Keep the claim held.');
++}
++export const terminalBindingHash=(binding:unknown)=>createHash('sha256').update(terminalBindingJSON(binding),'utf8').digest('hex');
++
++function expectedEpoch(){
++ const value=process.env.REMEDY_REVIEWER_TRUST_EPOCH;
++ if(!value||value!==value.trim()||value.length>512||/[\x00-\x1f\x7f]/.test(value))
++  throw reviewError('Terminal-proof recovery requires REMEDY_REVIEWER_TRUST_EPOCH to match the coordinated Bridge epoch. Scan, preview and separate unknown-outcome recovery remain available.',503);
++ return value;
++}
++const record=(value:any)=>value!==null&&typeof value==='object'&&!Array.isArray(value);
++
++/** Only authenticated status plus original stored intent can qualify an explicit recovery. */
++export function checkedRecoveryStatus(raw:any,intent:any,knownOperationID?:string){
++ const invalid=()=>reviewError('The operation has no trusted matching terminal or durable operator-resolution proof. Keep the claim held.');
++ if(!['apply','restore'].includes(intent?.action)||typeof intent.issuer!=='string'||!intent.issuer||typeof intent.jti!=='string'||!intent.jti
++  ||intent.binding?.action!==`cxone.${intent.action}`)throw invalid();
++ const status=checkedOutcome(raw,intent.action);
++ if(!status||(knownOperationID!==undefined&&status.metadata.operation_id!==knownOperationID))throw invalid();
++ const operation=safeOperationMetadata(status.metadata);
++ if(status.metadata.outcome==='unknown_write'){
++  if(raw.terminal_proof!=null||status.metadata.reconciliation!=='resolved'||status.metadata.requires_reconciliation!==false)throw invalid();
++  return {operation,terminalProof:null,recoveryKind:'offline_operator_resolution'};
++ }
++ if(!status.terminal||!record(raw.terminal_proof))throw invalid();
++ const p=raw.terminal_proof,keys=['contract','issuer','jti','operation_id','action','target','binding_sha256','outcome','reason','audit_recorded','state','terminal_updated_at','trust_epoch','durability_seq'];
++ if(JSON.stringify(Object.keys(p).sort())!==JSON.stringify(keys.sort())||p.contract!=='cxone-terminal-v1'
++  ||p.issuer!==intent.issuer||p.jti!==intent.jti||p.operation_id!==operation.operation_id||p.action!==operation.action
++  ||!record(p.target)||JSON.stringify(Object.keys(p.target).sort())!==JSON.stringify(['hostname','page_id'])
++  ||p.target.hostname!==intent.binding.target?.hostname||p.target.page_id!==intent.binding.target?.page_id
++  ||typeof p.target.page_id!=='string'||!/^([1-9][0-9]*)$/.test(p.target.page_id)
++  ||typeof p.binding_sha256!=='string'||!/^[a-f0-9]{64}$/.test(p.binding_sha256)||p.binding_sha256!==terminalBindingHash(intent.binding)
++  ||p.outcome!==operation.outcome||p.reason!==operation.reason||p.audit_recorded!==operation.audit_recorded||p.state!=='terminal'
++  ||p.terminal_updated_at!==operation.updated_at||new Date(p.terminal_updated_at).toISOString()!==p.terminal_updated_at
++  ||!Number.isSafeInteger(p.durability_seq)||p.durability_seq<0)throw invalid();
++ if(p.trust_epoch!==expectedEpoch())throw invalid();
++ return {operation,terminalProof:structuredClone(p),recoveryKind:'trusted_terminal'};
++}
++
++export function sameRecoveryStatus(first:ReturnType<typeof checkedRecoveryStatus>,second:ReturnType<typeof checkedRecoveryStatus>){
++ if(JSON.stringify(first)!==JSON.stringify(second))throw reviewError('The authoritative proof changed during recovery. Keep the claim held and explicitly revalidate; never retry a write.');
++}
+-- 
+2.54.0 (Apple Git-157)
+

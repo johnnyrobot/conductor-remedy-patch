@@ -1,7 +1,7 @@
 # conductor-remedy-patch
 
 The **Conductor side** of the LibreTexts Remedy accessibility matrix, shipped as
-target-specific twenty-eight-patch `git am` series against upstream Conductor, with
+target-specific thirty-patch `git am` series against upstream Conductor, with
 the original sixteen-patch delivery retained for history.
 
 This repository contains no Conductor source of its own. It is a delivery
@@ -71,6 +71,18 @@ identify what was actually validated.
 
 ---
 
+[LT-180 terminal-proof recovery](docs/releases/lt180-terminal-recovery.md)
+adds explicit support recovery for trusted known-success/no-write receipts after
+lost replies; lookup never unlocks or retries. `REMEDY_REVIEWER_TRUST_EPOCH` must
+be configured explicitly to the coordinated Bridge epoch for this path. It is
+non-secret and separate from the seven signer settings. Missing/invalid epoch
+disables only terminal-proof recovery, not startup, scans/previews or the existing
+unknown-outcome offline-resolution path. No signer is needed for historical
+recovery. After application, follow `docs/remedy-terminal-recovery.md` for exact
+permission, expected-version/confirmation/reason, fresh-scan/proof revalidation,
+immutable preparation/commit and export/rollback instructions. Unknown/pending/
+absent/404 or untrusted proofs stay held; preserved audit=false never becomes true.
+
 [LT-176 optional-mode implementation and compatibility evidence](docs/releases/lt176-optional-review.md)
 records the exact contract, component checks and remaining release gates.
 
@@ -83,10 +95,10 @@ targets selected by the Chief, not observations of the running production versio
 
 | Target | Manifest | Resulting source tree |
 |---|---|---|
-| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `fcfb5e47581bf08ff89747f9e0d5527efcc0ab3e` |
-| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `7081093bf9f53adee74a0fbb0803140fa37b574c` |
+| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `21dc9f021c64afeea6f507e9595d83581062a77a` |
+| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `9e70e609c860efd6c66f5c920ded9b491002cb81` |
 
-Each manifest lists its own twenty-eight ordered patches and SHA-256 checksums. Use
+Each manifest lists its own thirty ordered patches and SHA-256 checksums. Use
 Node 22 and a fresh **detached** clone; the command refuses a wrong base, dirty
 checkout, active branch, changed patch or escaping path before application.
 
@@ -122,7 +134,7 @@ production approval remain separate.
 [LT-127 explicit recovery evidence](docs/releases/lt127-explicit-recovery.md) records
 patch0023 and actual offline Bridge resolution followed by fresh local scan/CAS.
 Only support/superadmin plus project policy may invoke it; status lookup never
-unlocks. Known remote success after a lost local reply remains a contract gate.
+unlocks. Patch0029–0030 add trusted terminal-proof recovery for known outcomes; unknown/absent or untrusted states stay held under their explicit policy. No generic unlock is supplied.
 
 [LT-156 indexed projection evidence](docs/releases/lt156-indexed-projection.md) records
 patch0021, unchanged ordered selection and same-host sizing. Patch0022 adds bounded detail/history reads and immutable write-ahead operation
@@ -349,10 +361,10 @@ question flows. Full release validation still covers the coordinated stack.
 
 | Target | Server unit | Client unit | Authenticated route/Mongo | Builds |
 |---|---:|---:|---:|---|
-| Staging pinned `67301b35` | 62 pass | 298 pass | 74 pass | Client/server pass |
-| Released floor `352a657e` | 32 pass | 205 pass | 74 pass | Client/server pass |
+| Staging pinned `67301b35` | 79 pass | 299 pass | 94 pass | Client/server pass |
+| Released floor `352a657e` | 49 pass | 206 pass | 94 pass | Client/server pass |
 
-The current table records LT-176 component checks; LT-140 historical checks used Node 22.20.0 / npm 10.9.3 with the matching target's
+The current table records LT-180 component checks; LT-140 historical checks used Node 22.20.0 / npm 10.9.3 with the matching target's
 previously installed, unchanged lockfile dependencies. Both built servers reached
 real `/health` 200 under production mode with synthetic configuration and isolated
 MongoDB **7.0.14**. These were macOS process boots. The earlier compatibility
@@ -377,7 +389,7 @@ npm test
 npm run build
 ```
 
-The route integration suite requires an isolated loopback database named with
+The route integration suite additionally requires Python3 as an independent digest oracle (not an application runtime dependency), and an isolated loopback database named with
 `conductor_test_`; it drops that test database on teardown. See the guide before
 running it. The default unit runners do not run the independent Playwright visual
 journey. All upstream dev/test/visual commands and dependencies are retained.
