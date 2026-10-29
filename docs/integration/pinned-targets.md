@@ -8,8 +8,8 @@ Atlas tier, cluster topology and orchestrator are unknown.
 
 | Role | Upstream commit | Version context | Delivered tree |
 |---|---|---|---|
-| Primary staging | `67301b35c3784ed73ba1a65011ef5a1d689abca1` | Root package says 2.156.2; Chief assessment reported image label 2.157.0-rc.4 | `295a2f2c27d41799c425957dcc50492a2ad420f9` |
-| Secondary released floor | `352a657ec6de7b317a70ad3f8f744bc6d5054d9d` | v2.156.2 | `1207a86ac1a3b87dc88eb8b112ea505a1b97fd2e` |
+| Primary staging | `67301b35c3784ed73ba1a65011ef5a1d689abca1` | Root package says 2.156.2; Chief assessment reported image label 2.157.0-rc.4 | `86c72dd47fb2a7b673e2d7dacf21292ad949cc3b` |
+| Secondary released floor | `352a657ec6de7b317a70ad3f8f744bc6d5054d9d` | v2.156.2 | `7761cfed5421c3666f2ceaae62ff0f48522d1b75` |
 
 The image label is assessment context, not a pulled/booted image or observation of
 production. Do not use `latest`; approved deployment must pin compatible image
@@ -17,7 +17,7 @@ versions and digests. This work preserves the upstream Dockerfile and supplies
 source/patch integrity manifests, not a finished image/deployment bundle.
 
 Use the explicit fresh detached-checkout command in the repository README. Each
-manifest binds the full base commit, eighteen ordered patch files, SHA-256s and
+manifest binds the full base commit, nineteen ordered patch files, SHA-256s and
 final Git tree. The application tool checks those inputs and repository state
 before `git am --3way`, then checks the resulting tree. It makes no network call,
 reset, abort, branch deletion or push. On unexpected Git failure it preserves the
@@ -133,7 +133,7 @@ server redirect preserving query strings. Its 270 client tests, client/server
 builds and real health/302 redirect boot passed. This composition is not shipped
 as a third target and no upstream merge or push was performed.
 
-## Tenant configuration policy — release blocker LT-131
+## Tenant configuration policy — LT-131
 
 New server Remedy behavior must be explicitly enabled per deployment/tenant,
 default disabled. A client-only visibility flag is not authorization. Enabled
@@ -142,14 +142,25 @@ localhost is not an implicit engine address. Missing or invalid optional config
 must produce a useful feature-unavailable/preflight result without crashing
 unrelated Conductor functionality or enabling every campus.
 
-**That enforcement is not implemented by this compatibility slice.** Existing
-legacy aliases/fallback behavior still exists. LT-131 is the focused next slice,
-with actual route tests for disabled/missing/bad/enabled/cross-tenant config and
-zero external calls when disabled/unavailable. It must retain normal auth,
-editor/admin/support policy and the sandbox. Current ORG_ID deployment assumptions
-must be checked against any multi-tenant process; do not infer global enablement.
-Keep secrets out of client capability responses and logs. Production credential
-provisioning, actual tenant mapping and rollout remain separately authorized.
+Patch0019 implements this policy on both pinned targets. Set `REMEDY_ENABLED=true`
+and `REMEDY_ORG_ID` exactly matching startup `ORG_ID`; each accessed Project must
+also have that stored organization. Cross-tenant support access cannot enable
+another organization. Missing/false opt-in or missing/invalid explicit engine
+origin/key produces unavailable responses with zero external calls. No legacy
+alias or implicit localhost is used. Off-host engine URLs require HTTPS; explicit
+same-host HTTP loopback is allowed for local fixtures. Redirects are refused.
+
+The authenticated project-scoped health route returns safe effective capability
+and fixed messages. It preflights feature storage and authenticated engine
+`/v1/cxone/health`, requiring scan/preview/mutate capabilities rather than public
+liveness. The mounted UI follows that result. Disabled or unavailable optional
+Remedy does not prevent ordinary project reads or real Conductor health boot.
+A multi-organization process needs an explicitly approved mapping; this delivery
+opts in only its one named deployment organization. Production credential
+provisioning and rollout remain owner-only.
+
+[LT-131 validation](../releases/lt131-tenant-opt-in.md) records current checks and
+config controls; the compatibility table above remains historical evidence.
 
 ## Mongo collections, indexes and backup implications
 
@@ -159,13 +170,17 @@ provisioning, actual tenant mapping and rollout remain separately authorized.
 | `conformancerecords` | Automatic `_id`; lookup `{projectID:1,kind:1,createdAt:-1}` for append-only scope/review/sign-off records |
 | Existing `projects.a11yReview` | Stable section `_id`, source/rendered fingerprints, evidence revision and pending-write state |
 
-These models declare indexes through Mongoose. The current application does not
-establish feature-index readiness through the generic Mongo connection health
-check. Confirm collection/index creation privileges and index readiness before
+These models compile lazily and disable automatic collection/index creation.
+Configured authorized feature requests/preflight explicitly create the two
+collections and declared indexes; failures report unavailable and do not crash
+unrelated startup. Successful readiness is cached in-process; external index
+changes require operator preflight/restart. Generic Mongo connection health alone
+does not establish feature-index readiness. Confirm collection/index creation privileges and index readiness before
 enabling the feature; identify duplicate project/key pairs before creating a
 unique index on retained data. No automatic deduplication/deletion is authorized.
-LT-131 must also ensure disabled optional Remedy initialization does not destabilize
-unrelated tenant startup.
+Disabled optional Remedy does not compile either feature model at route import.
+The first enabled feature request needs collection/index creation privileges;
+no automatic retained-data repair or index deletion is performed.
 
 Work-item history/evidence arrays and append-only conformance records grow; no
 retention or compaction policy is introduced here. Back up Projects, work items,
@@ -182,8 +197,7 @@ Patch 0018 addresses LT-126 stale TOC overwrite and failed standalone-scan paren
 refresh; [current regression evidence](../releases/lt126-evidence-import.md) records
 both target checks separately from the compatibility evidence above. LT-127 holds audited pending reconciliation and
 full no-op/failed-rescan evidence preservation; signed producer work waits for the
-exact approved LT-1 contract. LT-128 performance/read bounds, tenant enforcement
-LT-131, deadlines/cancellation, automated patch CI, full-stack Linux/auth/provider
+exact approved LT-1 contract. LT-128 performance/read bounds, deadlines/cancellation, automated patch CI, full-stack Linux/auth/provider
 failure/restore coverage, immutable image bundle and reviewed upgrade/rollback
 handoff remain open under LT-115/LT-111. Compatibility validation retires the old
 recommended source base; it does not clear those production gates.
