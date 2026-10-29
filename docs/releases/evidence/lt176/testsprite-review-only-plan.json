@@ -1,0 +1,49 @@
+{
+  "projectId": "4e433799-7c02-442f-8d07-1a99dce6620c",
+  "type": "frontend",
+  "name": "Review-only Conductor scans and previews while automatic apply and restore stay unavailable",
+  "description": "A synthetic editor uses the actual authenticated local Conductor and real Server/Bridge review-only profile; scans and previews do not expose automatic write controls or establish conformance.",
+  "priority": "p0",
+  "planSteps": [
+    {
+      "type": "action",
+      "description": "Sign in using the configured synthetic test login if asked. Navigate directly to /projects/audit00001/accessibility."
+    },
+    {
+      "type": "assertion",
+      "description": "Verify the project accessibility page explicitly says Automatic edits are unavailable and directs edits through the normal book editor."
+    },
+    {
+      "type": "action",
+      "description": "Click Scan with Remedy, then Start Scan in the confirmation dialog. Wait until the source scan finishes and the dialog closes."
+    },
+    {
+      "type": "assertion",
+      "description": "Verify the Synthetic article row contains a fixable finding and the page shows no failed-scan warning."
+    },
+    {
+      "type": "action",
+      "description": "Open the first Fix finding button for Synthetic article. Click Preview changes and wait for the actual HTML diff."
+    },
+    {
+      "type": "assertion",
+      "description": "Verify the preview contains both current and proposed page HTML, and says automatic edits are unavailable."
+    },
+    {
+      "type": "assertion",
+      "description": "Verify the Apply to LibreTexts button is disabled and no I reviewed this preview and want to apply these changes checkbox is present."
+    },
+    {
+      "type": "action",
+      "description": "Close the preview dialog. In the Remediation work queue choose Synthetic article in Page tools, then click Rescan page and wait for completion."
+    },
+    {
+      "type": "assertion",
+      "description": "Verify the page-action tools have no Restore saved version button, no Apply reviewed fix and rescan button, and no Confirm restore and rescan button."
+    },
+    {
+      "type": "assertion",
+      "description": "Verify the WCAG reviewer report still says verification pending and the source scan/preview has not marked content conformant."
+    }
+  ]
+}

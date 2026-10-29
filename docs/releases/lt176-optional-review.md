@@ -34,13 +34,13 @@ and rendered-browser tools retain their actual request-specific failures.
 
 ## Component checks actually performed
 
-Both target series preserve the first 24 patch bytes and add patches 25–27.
-Fresh detached scratch checkouts reconstructed through the shipped manifest CLI (current receipts are staging-apply27.json and release-apply27.json; apply26 receipts retain the earlier review candidate):
+Both target series preserve the first 24 patch bytes and add patches 25–28.
+Fresh detached scratch checkouts reconstructed through the shipped manifest CLI (current receipts are staging-apply28.json and release-apply28.json; earlier receipts retain the earlier review candidate):
 
 | Target | Final source tree | Server | Client | Actual router/JWT/Session/Mongo |
 |---|---|---:|---:|---:|
-| staging `67301b35` | `3346a7ce1b3b12b095d880da92c93f102b7a8158` | 62 | 296 | 74 |
-| v2.156.2 `352a657e` | `8de1199ab6ff584804afc7c48deed4ca7ac052d2` | 32 | 203 | 74 |
+| staging `67301b35` | `fcfb5e47581bf08ff89747f9e0d5527efcc0ab3e` | 62 | 298 | 74 |
+| v2.156.2 `352a657e` | `7081093bf9f53adee74a0fbb0803140fa37b574c` | 32 | 205 | 74 |
 
 Client/server builds pass with Node22.20.0. Local unchanged-lockfile dependencies
 were reused from each independently installed matching target; Linux CI performs
@@ -52,7 +52,7 @@ The actual readiness regression failed before the change, as did valid-preview
 crafted-write denial and the mounted review-only restore-control test, then
 passed. Full signed-write/recovery regressions remain. Malformed capability and
 unknown profile cases, manual source-change freshness and permission failures are
-covered through actual registered routes. Initial review identified a latched read-failure retry blocker; an authenticated deliberate scan/preview retry now reaches Bridge without declaring it healthy or allowing mutation. New dependency-retry regression ran red then green, and actual three-service recovery now retries through Conductor itself. The standalone demo entry uses the typed API and React Query rather than ad-hoc component fetching. Both actual matrix and page tools are
+covered through actual registered routes. Review identified a latched read-failure retry blocker, including the matrix readiness helper and standalone API initialization; an authenticated deliberate scan/preview retry now reaches Bridge without declaring it healthy or allowing mutation. New dependency-retry regression ran red then green, and actual three-service recovery now retries through Conductor itself. The standalone demo entry uses the typed API and React Query rather than ad-hoc component fetching. Both actual matrix and page tools are
 mounted in UI regressions.
 
 [Actual three-service observations](evidence/lt176/actual-owned-http.json) prove
@@ -66,8 +66,7 @@ product passes. All nonfixture network egress was denied.
 
 ## Remaining gates
 
-Required before this change merges: both compiled Linux image phases and required
-review gates; focused authorized TestSprite verdict/artifact assessment. Existing
+Both compiled Linux image phases and the required review gates must pass before merge; exact CI and review receipts belong on the pull request. The focused TestSprite verdict/artifact assessment is recorded below. Existing
 full-write A/B are not relabeled or rerun. The new UI flow has a separate name.
 
 LT-180 terminal-proof recovery still awaits LT-179. Read-only lookup cannot release
@@ -79,3 +78,19 @@ SSO/tenant policy and operator backup/upgrade/rollback acceptance remain global
 gates. The applied `docs/remedy-storage-and-reads.md` and
 `docs/remediation-integration.md` retain storage/rollback requirements. Both
 manifests continue to state `deploymentReady:false`.
+
+
+## Focused TestSprite assessment
+
+Separate review-only test `cb75f5e0-aca6-47c3-a554-3981fcf000d8`, run
+`42805ec7-f535-4938-8fa8-938292482d4c`, ended **blocked at sign-in**. The six-step
+trace never reached the feature: login remained busy and direct project
+navigation reached the login/internal-error page. Actual local authentication
+and product routes passed on both targets, but that does not turn the tunneled
+run green. The run's result, authored plan and redacted steps are adjacent in
+`evidence/lt176`; failure bundle/video were inspected separately as private
+artifacts. The synthetic tunnel was only Conductor, never Bridge. No paid retry,
+old A/B relabeling or claim of full UI automation coverage is made.
+Observed usage was466.8 before and466.8 after the blocked run: net delta0.0; the
+CLI reports0.5 credits per run. Remaining authorized1.5-credit allowance was not
+used to repeat an environment failure. Earlier B remains inconclusive.
