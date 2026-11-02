@@ -181,6 +181,29 @@ if (phase === "off") {
   observation.defaultOffWithoutOptionalCollections = true;
 } else if (phase === "enabled") {
   assert.equal(readiness.data.available, true, JSON.stringify(readiness.data));
+  observation.healthTimeoutMilliseconds = {};
+  for (const mode of ["silent", "trickle"]) {
+    const beforeHealth = await control({ stalledHealth: mode });
+    try {
+      const started = performance.now();
+      const unavailable = await request(matrix + "/health?projectID=" + config.projectID);
+      const elapsed = performance.now() - started;
+      assert.ok(elapsed >= 4500 && elapsed < 7500, `health deadline elapsed ${elapsed}ms`);
+      assert.equal(unavailable.status, 200);
+      assert.equal(unavailable.data.available, false);
+      assert.equal(unavailable.data.state, "unavailable");
+      assert.deepEqual(unavailable.data.capabilities, { scan: false, preview: false, mutate: false, operation_status: false });
+      assert.match(unavailable.data.message, /did not respond within 5 seconds/);
+      const serialized = JSON.stringify(unavailable.data);
+      assert.equal(serialized.includes(config.key), false);
+      assert.doesNotMatch(serialized, /engine:8443|X-API-Key|AxiosError/);
+      observation.healthTimeoutMilliseconds[mode] = elapsed;
+    } finally {
+      assert.deepEqual(await control({ stalledHealth: "none" }), beforeHealth, "health lookup must not act or write");
+    }
+    assert.equal((await request(matrix + "/health?projectID=" + config.projectID)).data.available, true);
+  }
+  observation.boundedHealthAndNormalRecovery = true;
   assert.equal(
     (await request(matrix + "/scan", "POST", input, "auditor")).status,
     403,

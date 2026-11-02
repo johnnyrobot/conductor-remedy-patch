@@ -1,7 +1,7 @@
 # conductor-remedy-patch
 
 The **Conductor side** of the LibreTexts Remedy accessibility matrix, shipped as
-target-specific thirty-two-patch `git am` series against upstream Conductor, with
+target-specific thirty-three-patch `git am` series against upstream Conductor, with
 the original sixteen-patch delivery retained for history.
 
 This repository contains no Conductor source of its own. It is a delivery
@@ -71,6 +71,12 @@ identify what was actually validated.
 
 ---
 
+[LT-137 accessible controls and bounded health](docs/releases/lt137-accessible-health.md)
+adds patch0033 with named section controls, unique IDs and a five-second hard
+health deadline. The complete active manifests below preserve the original
+32-patch manifests and accepted candidate index unchanged. New images need their
+own verified execution receipts.
+
 [LT-180 terminal-proof recovery](docs/releases/lt180-terminal-recovery.md)
 adds explicit support recovery for trusted known-success/no-write receipts after
 lost replies; lookup never unlocks or retries. `REMEDY_REVIEWER_TRUST_EPOCH` must
@@ -95,10 +101,10 @@ targets selected by the Chief, not observations of the running production versio
 
 | Target | Manifest | Resulting source tree |
 |---|---|---|
-| Primary staging | [staging manifest](series/staging-67301b35/manifest.json) | `1edf0ba1516e39731f5c3289e31045bffda311f3` |
-| Released floor | [release manifest](series/release-2.156.2/manifest.json) | `a60544214de7d3613e1dad0da99a6c62722c49a8` |
+| Primary staging | [staging manifest](series/staging-67301b35/manifest-lt137.json) | `0e9ad86efa3d7bd70502157de03f5c22255ab5be` |
+| Released floor | [release manifest](series/release-2.156.2/manifest-lt137.json) | `ee5a848ac8687878293318559269d82405292e8e` |
 
-Each manifest lists its own thirty-two ordered patches and SHA-256 checksums. Use
+Each active manifest lists its own thirty-three ordered patches and SHA-256 checksums. Use
 Node 22 and a fresh **detached** clone; the command refuses a wrong base, dirty
 checkout, active branch, changed patch or escaping path before application.
 
@@ -109,11 +115,11 @@ conductor_checkout=/tmp/conductor-remedy-staging
 git clone https://github.com/LibreTexts/conductor.git "$conductor_checkout"
 git -C "$conductor_checkout" checkout --detach 67301b35c3784ed73ba1a65011ef5a1d689abca1
 node "$conductor_delivery/tools/apply-series.mjs" \
-  "$conductor_delivery/series/staging-67301b35/manifest.json" "$conductor_checkout"
+  "$conductor_delivery/series/staging-67301b35/manifest-lt137.json" "$conductor_checkout"
 ```
 
 For the released floor, select commit `352a657ec6de7b317a70ad3f8f744bc6d5054d9d`
-and `series/release-2.156.2/manifest.json` in a separate fresh clone. `--check`
+and `series/release-2.156.2/manifest-lt137.json` in a separate fresh clone. `--check`
 performs the manifest/checkout preflight without applying patches. A successful
 application verifies the final tree; it is not a production deployment approval.
 Applied commit IDs may vary with committer metadata; the expected source tree is
@@ -125,19 +131,19 @@ release gates. **Production readiness is false** in both manifests. Patch0019 im
 engine configuration. Patch0020 supplies signed operations and read-only status lookup; production
 release still requires the remaining operational/deployment gates. Never deploy an image selected by `latest`.
 
-[Current 32-patch candidate index](docs/releases/current-candidates.json) is the
-packaging reference, with [download/verification instructions](docs/releases/lt178-current-candidates.md).
+[Retained 32-patch candidate index](docs/releases/current-candidates.json) is the
+accepted historical packaging reference, with [download/verification instructions](docs/releases/lt178-current-candidates.md).
 It selects run40962740223 artifacts **12936278741** (staging, expires
 2026-11-12 at22:10:26UTC) and **12936304442** (release, expires
-2026-11-12 at22:13:20UTC), bound to the source trees above. Verify expiry and
+2026-11-12 at22:13:20UTC), bound to their original32-patch source trees, not the new patch0033 delivery. Verify expiry and
 all three distinct ZIP/archive/image identities before packaging; expired or
 unavailable artifacts require a reviewed revalidation and index update.
-This is a metadata correction to already-tested images, not a claim that a
-documentation commit rebuilt them. All original 32-patch bytes remain unchanged.
+That retained index is the LT-178 metadata correction to already-tested images;
+it is not execution evidence for the new source. All original 32-patch bytes remain unchanged.
 
 [Historical LT-158 Linux candidate validation](docs/releases/lt158-linux-candidate.md) documents
 the automated matrix and candidate artifact contract. Patch0024 pins the actual
-upstream Node22 Docker stages to one immutable base. Both final compiled Node22 production images passed Linux/amd64 CI with
+upstream Node22 Docker stages to one immutable base. Those historical compiled Node22 production images passed Linux/amd64 CI with
 synthetic internal fixtures and archived candidates; full owned-stack Linux and
 production approval remain separate.
 

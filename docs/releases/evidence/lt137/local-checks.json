@@ -1,0 +1,44 @@
+{
+  "node": "22.20.0",
+  "platform": "macOS arm64",
+  "dependencies": "unchanged matching target lockfiles; existing target dependencies linked only in fresh scratch clones",
+  "serverUnit": {
+    "staging": 80,
+    "release": 50
+  },
+  "clientUnit": {
+    "staging": 299,
+    "release": 206,
+    "workers": 2
+  },
+  "registeredRoutes": {
+    "staging": 95,
+    "release": 95,
+    "note": "complete route suites before hard-abort addition; final silent+trickle cases independently pass 2/2 on each target"
+  },
+  "builds": {
+    "stagingClient": true,
+    "releaseClient": true,
+    "stagingServerFinal": true,
+    "releaseServerFinal": true
+  },
+  "deliveryTests": 26,
+  "offlineArchiveTests": 3,
+  "redEvidence": {
+    "mounted": "Unable to find an accessible element with the role button and name Add section",
+    "oldHealthElapsedMilliseconds": 10022.869458000001,
+    "idleOnlyTrickleElapsedMilliseconds": 8176.803584000001
+  },
+  "initialClientRun": {
+    "staging": "297 pass / 2 fail",
+    "release": "204 pass / 2 fail",
+    "failures": [
+      "Test timed out in 5000ms.",
+      "Unable to find role=\"button\" and name `/submit review/i`"
+    ],
+    "disposition": "unchanged peer-review tests pass in complete suites with two workers; no assertions or deadlines changed"
+  },
+  "testSpriteRuns": 0,
+  "deploymentReady": false,
+  "productionWritesEnabled": false
+}

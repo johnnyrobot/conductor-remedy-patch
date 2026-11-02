@@ -29,8 +29,10 @@ jobs:
       matrix:
         include:
           - target: staging-67301b35
+            manifest: series/staging-67301b35/manifest-lt137.json
             database: conductor_test_ci_staging
           - target: release-2.156.2
+            manifest: series/release-2.156.2/manifest-lt137.json
             database: conductor_test_ci_release
     services:
       mongo:
@@ -50,9 +52,10 @@ jobs:
       - name: Reconstruct, test, baseline-relative typecheck, build and boot shipping image
         env:
           TARGET: ${{ matrix.target }}
+          MANIFEST: ${{ matrix.manifest }}
           TEST_DATABASE: ${{ matrix.database }}
         run: >-
-          node tools/validate-target.mjs "series/$TARGET/manifest.json"
+          node tools/validate-target.mjs "$MANIFEST"
           "$RUNNER_TEMP/conductor-$TARGET-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           "mongodb://127.0.0.1:27158/$TEST_DATABASE"
       - name: Preserve candidate image, exact manifests, reports and failure logs
