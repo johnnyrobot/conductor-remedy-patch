@@ -1,0 +1,49 @@
+{
+  "node": "22.20.0",
+  "environment": "macOS arm64; unchanged target lockfile dependencies in fresh upstream scratch clones",
+  "serverUnit": {
+    "staging": 80,
+    "release": 50
+  },
+  "clientUnit": {
+    "staging": 320,
+    "release": 227,
+    "workers": 1
+  },
+  "clientBuilds": {
+    "staging": true,
+    "release": true
+  },
+  "serverSourceChanged": false,
+  "serverBuildAndRoutes": "unchanged source already verified in LT137 exact-main run41396983353; new exact-head CI will independently repeat both builds and96 routes per target",
+  "redCases": [
+    "typed API accepted unknown profile",
+    "mounted matrix enabled Scan with Remedy on incompatible profile",
+    "malformed JSON exposed raw fixture error instead of fixed feedback"
+  ],
+  "transientFailures": [
+    {
+      "kind": "host-load timeout",
+      "message": "Test timed out in 5000ms.",
+      "observedLoadAverage": 79.13,
+      "focusedRun": "23passed/6failed then27passed/3failed; isolated legacy8passed; final complete suites pass without assertions/deadlines changed"
+    },
+    {
+      "kind": "unchanged Activity test timeout",
+      "run": "staging full319passed/1failed; quiet rerun320passed"
+    },
+    {
+      "kind": "client typecheck",
+      "message": "TS7006: Parameter id implicitly has an any type.",
+      "fix": "two test callback annotations, runtime unchanged; both builds pass"
+    }
+  ],
+  "testSpriteRuns": 0,
+  "globalFlags": {
+    "deploymentReady": false,
+    "productionWritesEnabled": false,
+    "liveProvidersVerified": false,
+    "productionSSOVerified": false,
+    "releaseOwnerAcceptance": false
+  }
+}

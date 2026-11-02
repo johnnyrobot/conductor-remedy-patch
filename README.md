@@ -1,7 +1,7 @@
 # conductor-remedy-patch
 
 The **Conductor side** of the LibreTexts Remedy accessibility matrix, shipped as
-target-specific thirty-four-patch `git am` series against upstream Conductor, with
+target-specific thirty-five-patch `git am` series against upstream Conductor, with
 the original sixteen-patch delivery retained for history.
 
 This repository contains no Conductor source of its own. It is a delivery
@@ -71,6 +71,12 @@ identify what was actually validated.
 
 ---
 
+[LT-190 shared typed capability query](docs/releases/lt190-capability-query.md)
+adds patch0035. The matrix and standalone entry preserve independent historical
+status while validating profiles/capabilities and isolating project changes.
+Fresh readiness remains mandatory before write dispatch; no lookup retries or
+clears a pending claim.
+
 [LT-137 accessible controls and bounded health](docs/releases/lt137-accessible-health.md)
 adds patches0033–0034 with named section controls, unique IDs and a five-second hard
 health deadline. The complete active manifests below preserve the original
@@ -101,10 +107,10 @@ targets selected by the Chief, not observations of the running production versio
 
 | Target | Manifest | Resulting source tree |
 |---|---|---|
-| Primary staging | [staging manifest](series/staging-67301b35/manifest-lt137.json) | `cf98fe7e66a9b39db4360e7037be7000ecc9ff5c` |
-| Released floor | [release manifest](series/release-2.156.2/manifest-lt137.json) | `c90a599d39eb9a77fd3e7aea1610b4836aefb0d7` |
+| Primary staging | [staging manifest](series/staging-67301b35/manifest-lt190.json) | `8d8a10f2b7fad7ff9029d37f301a56e93b22ccec` |
+| Released floor | [release manifest](series/release-2.156.2/manifest-lt190.json) | `babe674d8668969d99fd0bfe48774e2ef9104124` |
 
-Each active manifest lists its own thirty-four ordered patches and SHA-256 checksums. Use
+Each active manifest lists its own thirty-five ordered patches and SHA-256 checksums. Use
 Node 22 and a fresh **detached** clone; the command refuses a wrong base, dirty
 checkout, active branch, changed patch or escaping path before application.
 
@@ -115,11 +121,11 @@ conductor_checkout=/tmp/conductor-remedy-staging
 git clone https://github.com/LibreTexts/conductor.git "$conductor_checkout"
 git -C "$conductor_checkout" checkout --detach 67301b35c3784ed73ba1a65011ef5a1d689abca1
 node "$conductor_delivery/tools/apply-series.mjs" \
-  "$conductor_delivery/series/staging-67301b35/manifest-lt137.json" "$conductor_checkout"
+  "$conductor_delivery/series/staging-67301b35/manifest-lt190.json" "$conductor_checkout"
 ```
 
 For the released floor, select commit `352a657ec6de7b317a70ad3f8f744bc6d5054d9d`
-and `series/release-2.156.2/manifest-lt137.json` in a separate fresh clone. `--check`
+and `series/release-2.156.2/manifest-lt190.json` in a separate fresh clone. `--check`
 performs the manifest/checkout preflight without applying patches. A successful
 application verifies the final tree; it is not a production deployment approval.
 Applied commit IDs may vary with committer metadata; the expected source tree is
@@ -135,7 +141,7 @@ release still requires the remaining operational/deployment gates. Never deploy 
 accepted historical packaging reference, with [download/verification instructions](docs/releases/lt178-current-candidates.md).
 It selects run40962740223 artifacts **12936278741** (staging, expires
 2026-11-12 at22:10:26UTC) and **12936304442** (release, expires
-2026-11-12 at22:13:20UTC), bound to their original32-patch source trees, not the new LT-137 delivery. Verify expiry and
+2026-11-12 at22:13:20UTC), bound to their original32-patch source trees, not the active35-patch source delivery. Verify expiry and
 all three distinct ZIP/archive/image identities before packaging; expired or
 unavailable artifacts require a reviewed revalidation and index update.
 That retained index is the LT-178 metadata correction to already-tested images;
