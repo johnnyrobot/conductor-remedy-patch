@@ -1,0 +1,170 @@
+From cb242e00e090609102497d936f6613be8d26d7a0 Mon Sep 17 00:00:00 2001
+From: johnnyrobot <174211481+johnnyrobot@users.noreply.github.com>
+Date: Sun, 1 Nov 2026 21:15:54 -0800
+Subject: [PATCH] fix(a11y): name section controls and bound health
+ availability (LT-137)
+
+Give Add section an accessible name and unique IDs while preserving styles.
+Bound silent and trickling health responses to five seconds with fixed
+unavailable feedback. Keep action and recovery semantics unchanged.
+
+AI-Model: GPT-6 (Codex)
+---
+ .../ProjectAccessibility.capability.test.jsx  |  8 ++++-
+ .../projects/ProjectAccessibility.jsx         |  8 +++--
+ client/src/components/projects/Projects.css   |  2 +-
+ server/api/projects.js                        |  9 +++--
+ server/integration/remedy-routes.test.ts      | 33 +++++++++++++++++++
+ 5 files changed, 53 insertions(+), 7 deletions(-)
+
+diff --git a/client/src/components/projects/ProjectAccessibility.capability.test.jsx b/client/src/components/projects/ProjectAccessibility.capability.test.jsx
+index 602310ee..45ee260f 100644
+--- a/client/src/components/projects/ProjectAccessibility.capability.test.jsx
++++ b/client/src/components/projects/ProjectAccessibility.capability.test.jsx
+@@ -26,7 +26,13 @@ test('mounted project page follows server capability and leaves ordinary matrix
+     await act(async () => {});
+     expect(container.textContent).toContain('Remedy is not enabled for this project organization.');
+     expect([...container.querySelectorAll('button')].find(b => b.textContent.includes('Scan with Remedy'))).toBeDisabled();
+-    expect(container.querySelector('#access-add-section-btn')).not.toBeDisabled();
++    const add = screen.getByRole('button', { name: 'Add section' });
++    expect(add).toBeEnabled();
++    const ids = [...container.querySelectorAll('[id]')].map(node => node.id);
++    expect(ids.filter(id => id === 'access-add-section-btn')).toHaveLength(1);
++    expect(new Set(ids).size).toBe(ids.length);
++    await act(async () => fireEvent.click(add));
++    expect(await screen.findByText('Add Section')).toBeTruthy();
+     expect(container.querySelector('.remediation-work-queue')).toBeNull();
+     expect(external).not.toHaveBeenCalled();
+     expect(axios.get).toHaveBeenCalledWith('/project/accessibility/remedy/health', { params: { projectID: 'fixture01' } });
+diff --git a/client/src/components/projects/ProjectAccessibility.jsx b/client/src/components/projects/ProjectAccessibility.jsx
+index 4215a48d..b955ca15 100644
+--- a/client/src/components/projects/ProjectAccessibility.jsx
++++ b/client/src/components/projects/ProjectAccessibility.jsx
+@@ -428,6 +428,8 @@ const WcagReviewTable = ({
+                             icon
+                             onClick={openAddModal}
+                             id='access-add-section-btn'
++                            className='access-add-section-btn'
++                            aria-label='Add section'
+                         >
+                             <Icon name='add' />
+                         </Button>
+@@ -1601,7 +1603,7 @@ const ProjectAccessibility = (props) => {
+                                                 openAddModal={openAddModal}
+                                                 remedyAvailable={remedyReadAllowed}
+                                             />
+-                                            <div className='access-table-outer access-table-legacy-hidden'>
++                                            <div className='access-table-outer access-table-legacy-hidden' aria-hidden='true'>
+                                                 <div className='access-table-inner'>
+                                                     <Table celled structured className='mt-1p' id='access-table'>
+                                                         <Table.Header>
+@@ -1611,7 +1613,9 @@ const ProjectAccessibility = (props) => {
+                                                                         color='green'
+                                                                         icon
+                                                                         onClick={openAddModal}
+-                                                                        id='access-add-section-btn'
++                                                                        id='access-add-section-btn-legacy'
++                                                                        className='access-add-section-btn'
++                                                                        aria-label='Add section'
+                                                                     >
+                                                                         <Icon name='add' />
+                                                                     </Button>
+diff --git a/client/src/components/projects/Projects.css b/client/src/components/projects/Projects.css
+index e033c32c..8e2ba878 100644
+--- a/client/src/components/projects/Projects.css
++++ b/client/src/components/projects/Projects.css
+@@ -108,7 +108,7 @@
+ }
+ 
+ 
+-#access-add-section-btn {
++.access-add-section-btn {
+     width: 150px;
+     margin: 0;
+ }
+diff --git a/server/api/projects.js b/server/api/projects.js
+index f203bbbf..e76b8729 100644
+--- a/server/api/projects.js
++++ b/server/api/projects.js
+@@ -2821,17 +2821,20 @@ const checkProjectRemedyHealth = async (req, res) => {
+         try {
+             await ensureRemedyStorage();
+             const response = await axios.get(`${config.base}/v1/cxone/health`, {
+-                headers: { 'X-API-Key': config.key }, timeout: 10000,
++                headers: { 'X-API-Key': config.key }, timeout: 5000, signal: AbortSignal.timeout(5000),
+                 maxRedirects: 0, validateStatus: () => true,
+             });
+             const readiness = checkedRemedyReadiness(response.status, response.data);
+             return res.json({ err: false, ok: readiness.available, ...capability, ...readiness,
+                 state: readiness.available ? 'ready' : 'degraded',
+                 message: readiness.available ? '' : readiness.readRetry ? 'A review dependency failed. Retry a scan or preview after the connection recovers. Automatic edits remain unavailable.' : 'Remedy is unavailable. An operator must check the configured capabilities.' });
+-        } catch (_error) {
++        } catch (error) {
++            const timedOut = axios.isAxiosError(error) && ['ECONNABORTED', 'ETIMEDOUT', 'ERR_CANCELED'].includes(error.code);
+             return res.json({ err: false, ok: false, ...capability, available: false, state: 'unavailable',
+                 capabilities: { scan: false, preview: false, mutate: false, operation_status: false },
+-                message: 'Remedy is unavailable. An operator must check its configuration, storage and connection.' });
++                message: timedOut
++                    ? 'Remedy did not respond within 5 seconds. An operator must check its connection before checking availability again.'
++                    : 'Remedy is unavailable. An operator must check its configuration, storage and connection.' });
+         }
+     } catch (_error) {
+         return res.status(500).json({ err: true, errMsg: 'Unable to check Remedy availability.' });
+diff --git a/server/integration/remedy-routes.test.ts b/server/integration/remedy-routes.test.ts
+index 5787ac7e..8d34a14f 100644
+--- a/server/integration/remedy-routes.test.ts
++++ b/server/integration/remedy-routes.test.ts
+@@ -38,6 +38,7 @@ writeFileSync(keyPath, keys.privateKey.export({ format: 'pem', type: 'pkcs8' }),
+ const previews = new Map<string, any>(), operations = new Map<string, any>();
+ let previewExpiry = 0, invalidBinding = false, operationReady = true;
+ let readinessOverride: any = null;
++let stalledHealth: 'none' | 'silent' | 'trickle' = 'none';
+ let observedVerified: number | undefined;
+ let holdScan: (() => Promise<void>) | undefined;
+ let holdWrite: (() => Promise<void>) | undefined;
+@@ -89,6 +90,14 @@ before(async () => {
+   bridge = http.createServer(async (req, res) => {
+     let raw = ''; for await (const part of req) raw += part;
+     const body = raw ? JSON.parse(raw) : {};
++    if (req.url === '/v1/cxone/health' && stalledHealth === 'silent') return;
++    if (req.url === '/v1/cxone/health' && stalledHealth === 'trickle') {
++      res.writeHead(200, { 'Content-Type': 'application/json' });
++      const interval = setInterval(() => res.write(' '), 250);
++      const watchdog = setTimeout(() => res.end('{"ok":true}'), 8_000);
++      res.once('close', () => { clearInterval(interval); clearTimeout(watchdog); });
++      return;
++    }
+     if (req.url === '/v1/cxone/health') { if(readinessOverride?.ok===false)res.statusCode=503; assert.equal(req.headers['x-api-key'], 'synthetic_not_real'); res.setHeader('Content-Type','application/json'); return res.end(JSON.stringify(readinessOverride || { ok: true, state: "ready", capabilities: { scan: true, preview: true, mutate: true, operation_status: operationReady } })); }
+     calls.push({ path: req.url!, body });
+     if (rejectAction) { res.writeHead(503); return res.end(JSON.stringify({ detail: 'Rejected key synthetic_not_real at private-engine.example.invalid' })); }
+@@ -1162,3 +1171,27 @@ test('a current admin role is required after post-preparation proof revalidation
+  await User.updateOne({uuid:users.auditor},{$set:{roles:[{org:'libretexts',role:'user'}]}});release();assert.equal((await pending).status,403);
+  assert.equal((await Project.findOne({projectID}).lean())!.a11yReview[0].remedyWritePending,true);
+ });
++
++
++for (const mode of ['silent', 'trickle'] as const) test(`registered health route bounds ${mode} engine to five seconds with sanitized feedback`, { timeout: 12_000 }, async () => {
++  stalledHealth = mode;
++  try {
++    const started = performance.now();
++    const response = await request(`${matrix}/health?projectID=${projectID}`);
++    const elapsed = performance.now() - started;
++    assert.ok(elapsed >= 4_500 && elapsed < 7_500, `health deadline elapsed ${elapsed}ms`);
++    assert.equal(response.status, 200);
++    assert.equal(response.data.err, false);
++    assert.equal(response.data.available, false);
++    assert.equal(response.data.state, 'unavailable');
++    assert.deepEqual(response.data.capabilities, { scan: false, preview: false, mutate: false, operation_status: false });
++    assert.match(response.data.message, /did not respond within 5 seconds/);
++    assert.match(response.data.message, /operator.*connection/i);
++    assert.doesNotMatch(JSON.stringify(response.data), /synthetic_not_real|127\.0\.0\.1|X-API-Key|AxiosError/);
++    assert.equal(calls.length, 0);
++  } finally { stalledHealth = 'none'; }
++  const ready = await request(`${matrix}/health?projectID=${projectID}`);
++  assert.equal(ready.status, 200);
++  assert.equal(ready.data.available, true);
++  assert.deepEqual(ready.data.capabilities, { scan: true, preview: true, mutate: true, operation_status: true });
++});
+-- 
+2.54.0 (Apple Git-157)
+

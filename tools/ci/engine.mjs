@@ -18,7 +18,7 @@ let html = "<p><strong>Chapter</strong></p>",
   mode = "success",
   writes = 0,
   calls = 0,
-  scanCalls = 0, reviewOnly = false, historicalStatus = false;
+  scanCalls = 0, reviewOnly = false, historicalStatus = false, stalledHealth = "none";
 const metadata = (outcome, operationID = randomUUID()) => ({
   operation_id: operationID,
   action: "cxone.apply",
@@ -52,6 +52,7 @@ const server = https.createServer(
       const body = raw ? JSON.parse(raw) : {};
       if (req.url === "/control") {
         if (body.mode) mode = body.mode;
+        if (["none", "silent", "trickle"].includes(body.stalledHealth)) stalledHealth = body.stalledHealth;
         if (body.terminalDatabase) db=client.db("conductor_test_runtime_terminal");
         if (body.reviewOnly !== undefined) reviewOnly = body.reviewOnly;
         if (body.historicalStatus !== undefined) historicalStatus = body.historicalStatus;
@@ -76,6 +77,14 @@ const server = https.createServer(
             renderedHash: hash(html),
           }),
         );
+      }
+      if (req.url === "/v1/cxone/health" && stalledHealth === "silent") return;
+      if (req.url === "/v1/cxone/health" && stalledHealth === "trickle") {
+        res.writeHead(200);
+        const interval = setInterval(() => res.write(" "), 250);
+        const watchdog = setTimeout(() => res.end('{"ok":true}'), 8000);
+        res.once("close", () => { clearInterval(interval); clearTimeout(watchdog); });
+        return;
       }
       if (req.url === "/v1/cxone/health")
         return res.end(
