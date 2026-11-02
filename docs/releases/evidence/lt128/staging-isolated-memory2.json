@@ -1,0 +1,284 @@
+{
+  "synthetic": true,
+  "definition": "Fresh isolated server process. Parent consumes HTTP bodies; child memory excludes fixture construction, oracle and client buffers. 2ms samples plus endpoint readings; sampled maxima can undercount transient peaks. No OS cache flush.",
+  "measurements": [
+    {
+      "suffix": "?view=bounded-v2&status=open",
+      "coldMilliseconds": 80.93787500000008,
+      "warmMilliseconds": [
+        61.37679100000014,
+        45.38412500000004,
+        46.293959000000086,
+        46.5265830000003,
+        44.76908300000014,
+        61.959292000000005,
+        46.120166000000154,
+        45.404791999999816,
+        43.28808300000037,
+        43.438292000000274,
+        43.329499999999825,
+        43.868625000000065,
+        62.545958000000155,
+        48.711459000000104,
+        43.99400000000014,
+        43.55558299999984,
+        44.718832999999904,
+        41.89887499999986,
+        44.483791999999994,
+        62.57237500000019
+      ],
+      "p95": 62.545958000000155,
+      "responseBytes": 46942,
+      "memory": {
+        "kind": "measured",
+        "initial": {
+          "rss": 414793728,
+          "heapTotal": 219136000,
+          "heapUsed": 160073072,
+          "external": 26944451,
+          "arrayBuffers": 18769832
+        },
+        "peak": {
+          "rss": 604176384,
+          "heapTotal": 219136000,
+          "heapUsed": 291133552,
+          "external": 93404275,
+          "arrayBuffers": 18769832
+        },
+        "retained": {
+          "rss": 604209152,
+          "heapTotal": 211795968,
+          "heapUsed": 160931376,
+          "external": 35653168,
+          "arrayBuffers": 18778023
+        },
+        "maxRSS": 604995584
+      }
+    },
+    {
+      "suffix": "?view=bounded-v2&status=all",
+      "coldMilliseconds": 47.28825000000006,
+      "warmMilliseconds": [
+        44.25025000000005,
+        42.4692500000001,
+        41.986207999999806,
+        40.396790999999666,
+        43.31962499999963,
+        71.80024999999978,
+        51.458708000000115,
+        44.03470900000002,
+        43.883666999999605,
+        43.58745799999997,
+        43.647042000000056,
+        42.70458400000007,
+        60.80691700000034,
+        44.68241699999999,
+        46.05308299999979,
+        43.18883299999925,
+        43.21929100000034,
+        42.72791700000016,
+        44.11254199999985,
+        58.69658300000083
+      ],
+      "p95": 60.80691700000034,
+      "responseBytes": 47340,
+      "memory": {
+        "kind": "measured",
+        "initial": {
+          "rss": 604209152,
+          "heapTotal": 212058112,
+          "heapUsed": 160924688,
+          "external": 26871238,
+          "arrayBuffers": 18778024
+        },
+        "peak": {
+          "rss": 605306880,
+          "heapTotal": 212058112,
+          "heapUsed": 286634112,
+          "external": 95824662,
+          "arrayBuffers": 18778024
+        },
+        "retained": {
+          "rss": 601079808,
+          "heapTotal": 207306752,
+          "heapUsed": 152766416,
+          "external": 35649992,
+          "arrayBuffers": 18778023
+        },
+        "maxRSS": 605356032
+      }
+    },
+    {
+      "suffix": "?view=bounded-v2&status=verified",
+      "coldMilliseconds": 45.160499999999956,
+      "warmMilliseconds": [
+        43.89420799999971,
+        43.40295800000058,
+        41.990999999999985,
+        41.406042000000525,
+        44.15562500000033,
+        68.64687500000036,
+        51.63695800000005,
+        44.59283400000004,
+        43.65400000000045,
+        42.78974999999991,
+        43.678750000000036,
+        42.92787500000031,
+        61.902124999999614,
+        44.185875000000124,
+        43.479167000000416,
+        43.427042000000256,
+        43.674958000000515,
+        45.17808399999922,
+        42.24487500000032,
+        61.241250000000036
+      ],
+      "p95": 61.902124999999614,
+      "responseBytes": 47140,
+      "memory": {
+        "kind": "measured",
+        "initial": {
+          "rss": 601079808,
+          "heapTotal": 207568896,
+          "heapUsed": 152754824,
+          "external": 26866864,
+          "arrayBuffers": 18778024
+        },
+        "peak": {
+          "rss": 601407488,
+          "heapTotal": 207568896,
+          "heapUsed": 281786056,
+          "external": 93058454,
+          "arrayBuffers": 18778024
+        },
+        "retained": {
+          "rss": 601407488,
+          "heapTotal": 207568896,
+          "heapUsed": 152806616,
+          "external": 35649278,
+          "arrayBuffers": 18778023
+        },
+        "maxRSS": 605356032
+      }
+    },
+    {
+      "suffix": "/conformance",
+      "coldMilliseconds": 518.3900829999993,
+      "warmMilliseconds": [
+        495.8361249999998,
+        495.21425,
+        494.71983399999954,
+        482.91704200000004,
+        486.4228749999993,
+        521.2411670000001,
+        476.79070799999863,
+        478.0193330000002,
+        477.1633750000001,
+        475.97995900000024,
+        490.81175000000076,
+        485.203207999999,
+        502.03341700000055,
+        509.789084,
+        480.3187080000007,
+        483.4086669999997,
+        497.8364160000001,
+        484.9171669999996,
+        480.15787499999897,
+        503.239834
+      ],
+      "p95": 509.789084,
+      "responseBytes": 193390,
+      "memory": {
+        "kind": "measured",
+        "initial": {
+          "rss": 601407488,
+          "heapTotal": 207306752,
+          "heapUsed": 152802552,
+          "external": 26866864,
+          "arrayBuffers": 18778024
+        },
+        "peak": {
+          "rss": 759676928,
+          "heapTotal": 207306752,
+          "heapUsed": 481522232,
+          "external": 95679819,
+          "arrayBuffers": 18778024
+        },
+        "retained": {
+          "rss": 754761728,
+          "heapTotal": 224608256,
+          "heapUsed": 153941928,
+          "external": 36189103,
+          "arrayBuffers": 18794407
+        },
+        "maxRSS": 759676928
+      }
+    },
+    {
+      "suffix": "/conformance/report",
+      "coldMilliseconds": 5129.837499999998,
+      "warmMilliseconds": [],
+      "p95": null,
+      "responseBytes": 137221755,
+      "memory": {
+        "kind": "measured",
+        "initial": {
+          "rss": 754761728,
+          "heapTotal": 208355328,
+          "heapUsed": 153940944,
+          "external": 26883248,
+          "arrayBuffers": 18794408
+        },
+        "peak": {
+          "rss": 756826112,
+          "heapTotal": 208355328,
+          "heapUsed": 325440800,
+          "external": 40641426,
+          "arrayBuffers": 18794408
+        },
+        "retained": {
+          "rss": 756350976,
+          "heapTotal": 229326848,
+          "heapUsed": 154717920,
+          "external": 27879083,
+          "arrayBuffers": 18794407
+        },
+        "maxRSS": 759676928
+      }
+    },
+    {
+      "suffix": "/items/report",
+      "coldMilliseconds": 796.2434580000008,
+      "warmMilliseconds": [],
+      "p95": null,
+      "responseBytes": 21700987,
+      "memory": {
+        "kind": "measured",
+        "initial": {
+          "rss": 756350976,
+          "heapTotal": 208879616,
+          "heapUsed": 154473424,
+          "external": 26883874,
+          "arrayBuffers": 18786216
+        },
+        "peak": {
+          "rss": 756596736,
+          "heapTotal": 208879616,
+          "heapUsed": 215388240,
+          "external": 37657937,
+          "arrayBuffers": 18786216
+        },
+        "retained": {
+          "rss": 756285440,
+          "heapTotal": 214122496,
+          "heapUsed": 154188680,
+          "external": 30883311,
+          "arrayBuffers": 18794407
+        },
+        "maxRSS": 759676928
+      }
+    }
+  ],
+  "success": true,
+  "startupWarnings": "Api key is used with unsecure connection.\nFailed to obtain server version. Unable to check client-server compatibility. Set checkCompatibility=false to skip version check.\n(node:48702) [MONGOOSE] Warning: Duplicate schema index on {\"subdomain\":1} found. This is often due to declaring an index using both \"index: true\" and \"schema.index()\". Please remove the duplicate index definition.\n(Use `node --trace-warnings ...` to show where the warning was created)\n(node:48702) [MONGOOSE] Warning: Duplicate schema index on {\"uuid\":1} found. This is often due to declaring an index using both \"index: true\" and \"schema.index()\". Please remove the duplicate index definition.\n(node:48702) [MONGOOSE] Warning: Duplicate schema index on {\"projectID\":1} found. This is often due to declaring an index using both \"index: true\" and \"schema.index()\". Please remove the duplicate index definition.\n"
+}
