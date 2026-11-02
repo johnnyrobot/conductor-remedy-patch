@@ -1,0 +1,910 @@
+{
+  "staging": {
+    "host": {
+      "platform": "darwin",
+      "arch": "arm64",
+      "cpu": "Apple M2 Max"
+    },
+    "node": "v22.20.0",
+    "fixture": {
+      "pages": 500,
+      "criteria": 50,
+      "initialReviews": 25000,
+      "queueItems": 500,
+      "queueHistoryEvents": 125000,
+      "queueScanEvidenceEvents": 1000,
+      "reviewNotesBytes": 296
+    },
+    "definitions": {
+      "cold": "First invocation/request for that measurement after fixture seed, fresh process; Mongo and OS caches NOT flushed. API/auth bootstrap excluded.",
+      "warm": "20 serial subsequent invocations, nearest-rank p95; no retries.",
+      "memory": "Combined in-process server+HTTP client+harness; sampled RSS/heap and process high-water RSS, not isolated server peak.",
+      "rows": "Mongo command monitoring counts decoded batch documents, not storage-engine examined keys/docs. Query plans captured separately.",
+      "latency": "End-to-end loopback HTTP body read + JSON parse; production functions measured separately. Cold+20 warm samples exclude row/byte instrumentation; a separate extra invocation records driver batches."
+    },
+    "checks": [
+      "Owned synthetic database starts empty",
+      "Unauthenticated denied /conformance",
+      "Outsider denied /conformance",
+      "Unauthenticated denied /conformance/report",
+      "Outsider denied /conformance/report",
+      "Unauthenticated denied /items/report",
+      "Outsider denied /items/report",
+      "matching-25k actual loader matches oracle digest",
+      "matching-25k actual loader matches oracle verified total",
+      "matching-25k first page 100 and summary <=1MiB",
+      "matching-25k summary uses exact whole-project totals",
+      "matching-25k cursor visits every page exactly once",
+      "matching-25k full export complete, exact journal length and digest",
+      "matching-25k full export keeps reviewer notes",
+      "Queue bounded100 excludes history/scanEvidence",
+      "Fixed queue finds older open tasks before pagination",
+      "Queue v2 open bounded complete metadata",
+      "Queue v2 all bounded complete metadata",
+      "Queue v2 verified bounded complete metadata",
+      "Queue v2 todo bounded complete metadata",
+      "All four100-row open batches exactly cover400 older tasks",
+      "Queue reads preserve full journal SHA",
+      "Queue export complete all500/125k history",
+      "matching-25k all reads preserve journal SHA",
+      "mixed-25k actual loader matches oracle digest",
+      "mixed-25k actual loader matches oracle verified total",
+      "mixed-25k first page 100 and summary <=1MiB",
+      "mixed-25k summary uses exact whole-project totals",
+      "mixed-25k cursor visits every page exactly once",
+      "mixed-25k full export complete, exact journal length and digest",
+      "mixed-25k full export keeps reviewer notes",
+      "mixed-25k all reads preserve journal SHA",
+      "mixed-125k actual loader matches oracle digest",
+      "mixed-125k actual loader matches oracle verified total",
+      "mixed-125k first page 100 and summary <=1MiB",
+      "mixed-125k summary uses exact whole-project totals",
+      "mixed-125k cursor visits every page exactly once",
+      "mixed-125k full export complete, exact journal length and digest",
+      "mixed-125k full export keeps reviewer notes",
+      "mixed-125k all reads preserve journal SHA"
+    ],
+    "scenarios": [
+      {
+        "name": "matching-25k",
+        "reviews": 25000,
+        "counts": {
+          "total": 25000,
+          "verified": 24950,
+          "statuses": {
+            "pass": 24950,
+            "fail": 50,
+            "stale": 0,
+            "unreviewed": 0
+          },
+          "blockedPages": 0
+        },
+        "journalSHA256": "9217d3e245c7b8709166619bb60d4a6f9711ba7ac60519a6baa1f061e692adc3",
+        "measurements": [
+          {
+            "name": "production-conformanceReport",
+            "coldMs": 22.97,
+            "warm": null,
+            "decodedRowsPerInvocation": {}
+          },
+          {
+            "name": "production-loadConformance",
+            "coldMs": 192.61,
+            "warm": null,
+            "decodedRowsPerInvocation": {
+              "conformancerecords": 25001,
+              "killCursors": 0
+            }
+          },
+          {
+            "name": "authenticated-summary",
+            "coldMs": 268.59,
+            "warm": {
+              "min": 232.41,
+              "median": 242.49,
+              "p95": 282.99,
+              "max": 297.23
+            },
+            "responseBytes": 192487,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 1,
+              "projects": 1,
+              "conformancerecords": 25001,
+              "killCursors": 0
+            }
+          },
+          {
+            "name": "authenticated-summary-next-page",
+            "coldMs": 251.31,
+            "warm": null,
+            "responseBytes": 192708,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 1,
+              "projects": 1,
+              "conformancerecords": 25001,
+              "killCursors": 0
+            }
+          },
+          {
+            "name": "authenticated-one-criterion",
+            "coldMs": 95.01,
+            "warm": null,
+            "responseBytes": 1540,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 1,
+              "projects": 1,
+              "conformancerecords": 3
+            }
+          },
+          {
+            "name": "authenticated-full-export",
+            "coldMs": 2455.31,
+            "warm": null,
+            "responseBytes": 66030692,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 1,
+              "projects": 1,
+              "conformancerecords": 100003,
+              "killCursors": 0
+            }
+          },
+          {
+            "name": "authenticated-queue",
+            "coldMs": 85.62,
+            "warm": {
+              "min": 78.53,
+              "median": 81.84,
+              "p95": 120.86,
+              "max": 134.8
+            },
+            "responseBytes": 46954,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 2,
+              "projects": 1,
+              "remediationworkitems": 101
+            }
+          },
+          {
+            "name": "authenticated-queue-v2-open",
+            "coldMs": 87.37,
+            "warm": {
+              "min": 76.01,
+              "median": 81.73,
+              "p95": 119.36,
+              "max": 132.16
+            },
+            "responseBytes": 46942,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 2,
+              "projects": 1,
+              "remediationworkitems": 103
+            }
+          },
+          {
+            "name": "authenticated-queue-v2-all",
+            "coldMs": 85.17,
+            "warm": {
+              "min": 78.96,
+              "median": 81.59,
+              "p95": 120.68,
+              "max": 130.89
+            },
+            "responseBytes": 47340,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 2,
+              "projects": 1,
+              "remediationworkitems": 103
+            }
+          },
+          {
+            "name": "authenticated-queue-v2-verified",
+            "coldMs": 84.31,
+            "warm": {
+              "min": 75.62,
+              "median": 81.72,
+              "p95": 118.74,
+              "max": 131.69
+            },
+            "responseBytes": 47140,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 2,
+              "projects": 1,
+              "remediationworkitems": 102
+            }
+          },
+          {
+            "name": "authenticated-queue-v2-todo",
+            "coldMs": 87.33,
+            "warm": {
+              "min": 76.77,
+              "median": 79.4,
+              "p95": 117.13,
+              "max": 117.75
+            },
+            "responseBytes": 46942,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 2,
+              "projects": 1,
+              "remediationworkitems": 103
+            }
+          },
+          {
+            "name": "authenticated-task-history",
+            "coldMs": 80.88,
+            "warm": {
+              "min": 74.64,
+              "median": 78.12,
+              "p95": 116.71,
+              "max": 128.97
+            },
+            "responseBytes": 18980,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 1,
+              "projects": 1,
+              "remediationworkitems": 1
+            }
+          },
+          {
+            "name": "authenticated-queue-export",
+            "coldMs": 1005.59,
+            "warm": null,
+            "responseBytes": 21700987,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 1,
+              "projects": 1,
+              "remediationworkitems": 501
+            }
+          },
+          {
+            "name": "production-queueCandidates-50-manual",
+            "coldMs": 0.44,
+            "warm": {
+              "min": 0.07,
+              "median": 0.08,
+              "p95": 0.09,
+              "max": 0.1
+            },
+            "decodedRowsPerInvocation": {}
+          }
+        ]
+      },
+      {
+        "name": "mixed-25k",
+        "reviews": 25000,
+        "counts": {
+          "total": 25000,
+          "verified": 19950,
+          "statuses": {
+            "pass": 22450,
+            "fail": 50,
+            "stale": 2500,
+            "unreviewed": 0
+          },
+          "blockedPages": 100
+        },
+        "journalSHA256": "9217d3e245c7b8709166619bb60d4a6f9711ba7ac60519a6baa1f061e692adc3",
+        "measurements": [
+          {
+            "name": "production-conformanceReport",
+            "coldMs": 25.6,
+            "warm": null,
+            "decodedRowsPerInvocation": {}
+          },
+          {
+            "name": "production-loadConformance",
+            "coldMs": 188.15,
+            "warm": null,
+            "decodedRowsPerInvocation": {
+              "conformancerecords": 25001
+            }
+          },
+          {
+            "name": "authenticated-summary",
+            "coldMs": 269.34,
+            "warm": {
+              "min": 237.43,
+              "median": 257.16,
+              "p95": 325.91,
+              "max": 338.26
+            },
+            "responseBytes": 193390,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 1,
+              "projects": 1,
+              "conformancerecords": 25001
+            }
+          },
+          {
+            "name": "authenticated-summary-next-page",
+            "coldMs": 301.91,
+            "warm": null,
+            "responseBytes": 193611,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 1,
+              "projects": 1,
+              "conformancerecords": 25001
+            }
+          },
+          {
+            "name": "authenticated-one-criterion",
+            "coldMs": 111.23,
+            "warm": null,
+            "responseBytes": 1540,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 1,
+              "projects": 1,
+              "conformancerecords": 3
+            }
+          },
+          {
+            "name": "authenticated-full-export",
+            "coldMs": 2624.91,
+            "warm": null,
+            "responseBytes": 63676195,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 1,
+              "projects": 1,
+              "conformancerecords": 97503
+            }
+          }
+        ]
+      },
+      {
+        "name": "mixed-125k",
+        "reviews": 125000,
+        "counts": {
+          "total": 25000,
+          "verified": 19950,
+          "statuses": {
+            "pass": 22450,
+            "fail": 50,
+            "stale": 2500,
+            "unreviewed": 0
+          },
+          "blockedPages": 100
+        },
+        "journalSHA256": "17eb23dd6fce4f03db24f35674e434e55807b561e9f4d011bf86807655ef50af",
+        "measurements": [
+          {
+            "name": "production-conformanceReport",
+            "coldMs": 40.69,
+            "warm": null,
+            "decodedRowsPerInvocation": {}
+          },
+          {
+            "name": "production-loadConformance",
+            "coldMs": 830.03,
+            "warm": null,
+            "decodedRowsPerInvocation": {
+              "conformancerecords": 125001
+            }
+          },
+          {
+            "name": "authenticated-summary",
+            "coldMs": 927.79,
+            "warm": {
+              "min": 870.23,
+              "median": 985.61,
+              "p95": 1069.56,
+              "max": 1085.1
+            },
+            "responseBytes": 193390,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 1,
+              "projects": 1,
+              "conformancerecords": 125001
+            }
+          },
+          {
+            "name": "authenticated-summary-next-page",
+            "coldMs": 1026.44,
+            "warm": null,
+            "responseBytes": 193611,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 1,
+              "projects": 1,
+              "conformancerecords": 125001
+            }
+          },
+          {
+            "name": "authenticated-one-criterion",
+            "coldMs": 136.69,
+            "warm": null,
+            "responseBytes": 1540,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 1,
+              "projects": 1,
+              "conformancerecords": 7
+            }
+          },
+          {
+            "name": "authenticated-full-export",
+            "coldMs": 7068.26,
+            "warm": null,
+            "responseBytes": 137221755,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 1,
+              "projects": 1,
+              "conformancerecords": 375003,
+              "killCursors": 0
+            }
+          }
+        ]
+      }
+    ],
+    "queueJournalSHA256": "4ac9a335d554a5b9c890a4017cebeb3f0fab526f5e1993febcf8e7a2f7172755"
+  },
+  "release": {
+    "host": {
+      "platform": "darwin",
+      "arch": "arm64",
+      "cpu": "Apple M2 Max"
+    },
+    "node": "v22.20.0",
+    "fixture": {
+      "pages": 500,
+      "criteria": 50,
+      "initialReviews": 25000,
+      "queueItems": 500,
+      "queueHistoryEvents": 125000,
+      "queueScanEvidenceEvents": 1000,
+      "reviewNotesBytes": 296
+    },
+    "definitions": {
+      "cold": "First invocation/request for that measurement after fixture seed, fresh process; Mongo and OS caches NOT flushed. API/auth bootstrap excluded.",
+      "warm": "20 serial subsequent invocations, nearest-rank p95; no retries.",
+      "memory": "Combined in-process server+HTTP client+harness; sampled RSS/heap and process high-water RSS, not isolated server peak.",
+      "rows": "Mongo command monitoring counts decoded batch documents, not storage-engine examined keys/docs. Query plans captured separately.",
+      "latency": "End-to-end loopback HTTP body read + JSON parse; production functions measured separately. Cold+20 warm samples exclude row/byte instrumentation; a separate extra invocation records driver batches."
+    },
+    "checks": [
+      "Owned synthetic database starts empty",
+      "Unauthenticated denied /conformance",
+      "Outsider denied /conformance",
+      "Unauthenticated denied /conformance/report",
+      "Outsider denied /conformance/report",
+      "Unauthenticated denied /items/report",
+      "Outsider denied /items/report",
+      "matching-25k actual loader matches oracle digest",
+      "matching-25k actual loader matches oracle verified total",
+      "matching-25k first page 100 and summary <=1MiB",
+      "matching-25k summary uses exact whole-project totals",
+      "matching-25k cursor visits every page exactly once",
+      "matching-25k full export complete, exact journal length and digest",
+      "matching-25k full export keeps reviewer notes",
+      "Queue bounded100 excludes history/scanEvidence",
+      "Fixed queue finds older open tasks before pagination",
+      "Queue v2 open bounded complete metadata",
+      "Queue v2 all bounded complete metadata",
+      "Queue v2 verified bounded complete metadata",
+      "Queue v2 todo bounded complete metadata",
+      "All four100-row open batches exactly cover400 older tasks",
+      "Queue reads preserve full journal SHA",
+      "Queue export complete all500/125k history",
+      "matching-25k all reads preserve journal SHA",
+      "mixed-25k actual loader matches oracle digest",
+      "mixed-25k actual loader matches oracle verified total",
+      "mixed-25k first page 100 and summary <=1MiB",
+      "mixed-25k summary uses exact whole-project totals",
+      "mixed-25k cursor visits every page exactly once",
+      "mixed-25k full export complete, exact journal length and digest",
+      "mixed-25k full export keeps reviewer notes",
+      "mixed-25k all reads preserve journal SHA",
+      "mixed-125k actual loader matches oracle digest",
+      "mixed-125k actual loader matches oracle verified total",
+      "mixed-125k first page 100 and summary <=1MiB",
+      "mixed-125k summary uses exact whole-project totals",
+      "mixed-125k cursor visits every page exactly once",
+      "mixed-125k full export complete, exact journal length and digest",
+      "mixed-125k full export keeps reviewer notes",
+      "mixed-125k all reads preserve journal SHA"
+    ],
+    "scenarios": [
+      {
+        "name": "matching-25k",
+        "reviews": 25000,
+        "counts": {
+          "total": 25000,
+          "verified": 24950,
+          "statuses": {
+            "pass": 24950,
+            "fail": 50,
+            "stale": 0,
+            "unreviewed": 0
+          },
+          "blockedPages": 0
+        },
+        "journalSHA256": "75ad5464334986d7f9529fff463656cdeee47a9ee2970c747d8b22bec0b9a41a",
+        "measurements": [
+          {
+            "name": "production-conformanceReport",
+            "coldMs": 23.04,
+            "warm": null,
+            "decodedRowsPerInvocation": {}
+          },
+          {
+            "name": "production-loadConformance",
+            "coldMs": 210.55,
+            "warm": null,
+            "decodedRowsPerInvocation": {
+              "conformancerecords": 25001,
+              "killCursors": 0
+            }
+          },
+          {
+            "name": "authenticated-summary",
+            "coldMs": 286.44,
+            "warm": {
+              "min": 260.8,
+              "median": 270.87,
+              "p95": 315.46,
+              "max": 331.31
+            },
+            "responseBytes": 192487,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 1,
+              "projects": 1,
+              "conformancerecords": 25001,
+              "killCursors": 0
+            }
+          },
+          {
+            "name": "authenticated-summary-next-page",
+            "coldMs": 275.78,
+            "warm": null,
+            "responseBytes": 192708,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 1,
+              "projects": 1,
+              "conformancerecords": 25001,
+              "killCursors": 0
+            }
+          },
+          {
+            "name": "authenticated-one-criterion",
+            "coldMs": 93.11,
+            "warm": null,
+            "responseBytes": 1540,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 1,
+              "projects": 1,
+              "conformancerecords": 3
+            }
+          },
+          {
+            "name": "authenticated-full-export",
+            "coldMs": 2540.15,
+            "warm": null,
+            "responseBytes": 66030692,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 1,
+              "projects": 1,
+              "conformancerecords": 100003,
+              "killCursors": 0
+            }
+          },
+          {
+            "name": "authenticated-queue",
+            "coldMs": 80.98,
+            "warm": {
+              "min": 74.44,
+              "median": 79.01,
+              "p95": 120.66,
+              "max": 132.22
+            },
+            "responseBytes": 46954,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 2,
+              "projects": 1,
+              "remediationworkitems": 101
+            }
+          },
+          {
+            "name": "authenticated-queue-v2-open",
+            "coldMs": 86.34,
+            "warm": {
+              "min": 73.82,
+              "median": 77.28,
+              "p95": 117.84,
+              "max": 117.9
+            },
+            "responseBytes": 46942,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 2,
+              "projects": 1,
+              "remediationworkitems": 103
+            }
+          },
+          {
+            "name": "authenticated-queue-v2-all",
+            "coldMs": 83.22,
+            "warm": {
+              "min": 76.68,
+              "median": 79.78,
+              "p95": 120.45,
+              "max": 128.9
+            },
+            "responseBytes": 47340,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 2,
+              "projects": 1,
+              "remediationworkitems": 103
+            }
+          },
+          {
+            "name": "authenticated-queue-v2-verified",
+            "coldMs": 87.37,
+            "warm": {
+              "min": 74.61,
+              "median": 78.32,
+              "p95": 117.89,
+              "max": 131.41
+            },
+            "responseBytes": 47140,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 2,
+              "projects": 1,
+              "remediationworkitems": 102
+            }
+          },
+          {
+            "name": "authenticated-queue-v2-todo",
+            "coldMs": 86.15,
+            "warm": {
+              "min": 74.25,
+              "median": 77.63,
+              "p95": 124.09,
+              "max": 134.46
+            },
+            "responseBytes": 46942,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 2,
+              "projects": 1,
+              "remediationworkitems": 103
+            }
+          },
+          {
+            "name": "authenticated-task-history",
+            "coldMs": 79.91,
+            "warm": {
+              "min": 72.07,
+              "median": 74.89,
+              "p95": 116.61,
+              "max": 125.03
+            },
+            "responseBytes": 18980,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 1,
+              "projects": 1,
+              "remediationworkitems": 1
+            }
+          },
+          {
+            "name": "authenticated-queue-export",
+            "coldMs": 964.9,
+            "warm": null,
+            "responseBytes": 21700987,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 1,
+              "projects": 1,
+              "remediationworkitems": 501
+            }
+          },
+          {
+            "name": "production-queueCandidates-50-manual",
+            "coldMs": 0.47,
+            "warm": {
+              "min": 0.08,
+              "median": 0.08,
+              "p95": 0.09,
+              "max": 0.12
+            },
+            "decodedRowsPerInvocation": {}
+          }
+        ]
+      },
+      {
+        "name": "mixed-25k",
+        "reviews": 25000,
+        "counts": {
+          "total": 25000,
+          "verified": 19950,
+          "statuses": {
+            "pass": 22450,
+            "fail": 50,
+            "stale": 2500,
+            "unreviewed": 0
+          },
+          "blockedPages": 100
+        },
+        "journalSHA256": "75ad5464334986d7f9529fff463656cdeee47a9ee2970c747d8b22bec0b9a41a",
+        "measurements": [
+          {
+            "name": "production-conformanceReport",
+            "coldMs": 25.46,
+            "warm": null,
+            "decodedRowsPerInvocation": {}
+          },
+          {
+            "name": "production-loadConformance",
+            "coldMs": 188.34,
+            "warm": null,
+            "decodedRowsPerInvocation": {
+              "conformancerecords": 25001
+            }
+          },
+          {
+            "name": "authenticated-summary",
+            "coldMs": 272.21,
+            "warm": {
+              "min": 231.25,
+              "median": 236.13,
+              "p95": 309.63,
+              "max": 323.4
+            },
+            "responseBytes": 193390,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 1,
+              "projects": 1,
+              "conformancerecords": 25001
+            }
+          },
+          {
+            "name": "authenticated-summary-next-page",
+            "coldMs": 250.97,
+            "warm": null,
+            "responseBytes": 193611,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 1,
+              "projects": 1,
+              "conformancerecords": 25001
+            }
+          },
+          {
+            "name": "authenticated-one-criterion",
+            "coldMs": 95.8,
+            "warm": null,
+            "responseBytes": 1540,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 1,
+              "projects": 1,
+              "conformancerecords": 3
+            }
+          },
+          {
+            "name": "authenticated-full-export",
+            "coldMs": 2247.36,
+            "warm": null,
+            "responseBytes": 63676195,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 1,
+              "projects": 1,
+              "conformancerecords": 97503
+            }
+          }
+        ]
+      },
+      {
+        "name": "mixed-125k",
+        "reviews": 125000,
+        "counts": {
+          "total": 25000,
+          "verified": 19950,
+          "statuses": {
+            "pass": 22450,
+            "fail": 50,
+            "stale": 2500,
+            "unreviewed": 0
+          },
+          "blockedPages": 100
+        },
+        "journalSHA256": "6fb2d7d056f8c85f05173c8f100056ff072df5d7285dacf0c445ddb2e2abbed6",
+        "measurements": [
+          {
+            "name": "production-conformanceReport",
+            "coldMs": 26.87,
+            "warm": null,
+            "decodedRowsPerInvocation": {}
+          },
+          {
+            "name": "production-loadConformance",
+            "coldMs": 670.24,
+            "warm": null,
+            "decodedRowsPerInvocation": {
+              "conformancerecords": 125001
+            }
+          },
+          {
+            "name": "authenticated-summary",
+            "coldMs": 751.42,
+            "warm": {
+              "min": 702.93,
+              "median": 798.73,
+              "p95": 815.69,
+              "max": 827.72
+            },
+            "responseBytes": 193390,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 1,
+              "projects": 1,
+              "conformancerecords": 125001
+            }
+          },
+          {
+            "name": "authenticated-summary-next-page",
+            "coldMs": 739.07,
+            "warm": null,
+            "responseBytes": 193611,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 1,
+              "projects": 1,
+              "conformancerecords": 125001
+            }
+          },
+          {
+            "name": "authenticated-one-criterion",
+            "coldMs": 97.39,
+            "warm": null,
+            "responseBytes": 1540,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 1,
+              "projects": 1,
+              "conformancerecords": 7
+            }
+          },
+          {
+            "name": "authenticated-full-export",
+            "coldMs": 6496.99,
+            "warm": null,
+            "responseBytes": 137221755,
+            "decodedRowsPerInvocation": {
+              "sessions": 1,
+              "users": 1,
+              "projects": 1,
+              "conformancerecords": 375003,
+              "killCursors": 0
+            }
+          }
+        ]
+      }
+    ],
+    "queueJournalSHA256": "9343870d8b5d9141b5d36f7cb31b4daa5e0745bd06c2e69362e81b8ec9bb320a"
+  }
+}

@@ -29,10 +29,10 @@ jobs:
       matrix:
         include:
           - target: staging-67301b35
-            manifest: series/staging-67301b35/manifest-lt190.json
+            manifest: series/staging-67301b35/manifest-lt128.json
             database: conductor_test_ci_staging
           - target: release-2.156.2
-            manifest: series/release-2.156.2/manifest-lt190.json
+            manifest: series/release-2.156.2/manifest-lt128.json
             database: conductor_test_ci_release
     services:
       mongo:

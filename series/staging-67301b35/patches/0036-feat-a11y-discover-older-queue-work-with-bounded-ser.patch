@@ -1,0 +1,505 @@
+From 47eb860f9d6d6f72c5a2f0dd42e9bcc05e95114c Mon Sep 17 00:00:00 2001
+From: Conductor Patch Dev <candidate-ci@users.noreply.github.com>
+Date: Mon, 2 Nov 2026 04:39:13 -0800
+Subject: [PATCH] feat(a11y): discover older queue work with bounded server
+ filters
+
+---
+ .../RemediationWorkQueue.bounded.test.tsx     | 76 +++++++++++++++++
+ .../projects/RemediationWorkQueue.tsx         | 48 +++++++----
+ docs/remedy-queue-bounded.md                  | 74 +++++++++++++++++
+ docs/remedy-storage-and-reads.md              |  7 ++
+ server/api/remediationqueue.ts                | 17 ++--
+ server/integration/remedy-routes.test.ts      | 81 +++++++++++++++++++
+ server/util/remedyQueueReads.ts               | 54 +++++++++++++
+ 7 files changed, 335 insertions(+), 22 deletions(-)
+ create mode 100644 client/src/components/projects/RemediationWorkQueue.bounded.test.tsx
+ create mode 100644 docs/remedy-queue-bounded.md
+ create mode 100644 server/util/remedyQueueReads.ts
+
+diff --git a/client/src/components/projects/RemediationWorkQueue.bounded.test.tsx b/client/src/components/projects/RemediationWorkQueue.bounded.test.tsx
+new file mode 100644
+index 00000000..4f420d7f
+--- /dev/null
++++ b/client/src/components/projects/RemediationWorkQueue.bounded.test.tsx
+@@ -0,0 +1,76 @@
++import React from 'react';
++import { render, screen, cleanup, waitFor, fireEvent, within, act } from '@testing-library/react';
++import { afterEach, expect, test, vi } from 'vitest';
++import RemediationWorkQueue from './RemediationWorkQueue';
++afterEach(()=>{cleanup();vi.unstubAllGlobals();});
++const openStatuses=['todo','in_progress','needs_review','blocked'];
++function dataset(size=500) { return Array.from({length:size},(_,i)=>({_id:`task-${i}`,key:`key-${i}`,sectionID:'p1',sectionTitle:'Synthetic page',title:`Task ${i}`,status:size===500?(i>=400?'verified':openStatuses[i%4]):'todo',priority:'normal',version:0})); }
++function fixture(rows=dataset(),canEdit=false) {
++ const calls:{url:URL,method:string}[]=[];
++ const fetcher=vi.fn(async(url:string,init?:RequestInit)=>{
++  const parsed=new URL(url,'http://localhost');calls.push({url:parsed,method:init?.method||'GET'});
++  if(init?.method==='PATCH'){
++   const item=rows.find(x=>parsed.pathname.endsWith('/'+x._id))!;Object.assign(item,JSON.parse(String(init.body)),{version:item.version+1});
++   return {ok:true,json:async()=>({err:false,item})};
++  }
++  if(parsed.pathname.endsWith('/history'))return {ok:true,json:async()=>({records:[{historyID:'immutable-1',actor:'reviewer',note:'Preserved original note',at:'2026-11-02T00:00:00Z',status:'todo'}],nextCursor:null})};
++  const status=parsed.searchParams.get('status')||'all',offset=Number(parsed.searchParams.get('cursor')||0);
++  const matching=rows.filter(x=>status==='all'||(status==='open'?x.status!=='verified':x.status===status)).slice().reverse();
++  const items=matching.slice(offset,offset+100),hasMore=offset+items.length<matching.length;
++  return {ok:true,json:async()=>({err:false,view:'bounded-v2',status,canEdit,items,users:[],sections:[],candidates:[],nextCursor:hasMore?String(offset+items.length):null,lists:{items:{total:matching.length,returned:items.length,complete:offset===0&&!hasMore,hasMore}}})};
++ });vi.stubGlobal('fetch',fetcher);return{fetcher,calls,rows};
++}
++test('default open requests globally filtered rows and traverses all400 older tasks in four bounded batches',async()=>{
++ const {calls}=fixture();render(<RemediationWorkQueue projectID="project123"/>);
++ expect(await screen.findByText(/Task 399$/)).toBeTruthy();expect(calls[0].url.searchParams.get('view')).toBe('bounded-v2');expect(calls[0].url.searchParams.get('status')).toBe('open');
++ expect(screen.getByText('400',{selector:'strong'})).toBeTruthy();
++ for(const top of [299,199,99]){fireEvent.click(screen.getByRole('button',{name:'Next 100 work items'}));expect(await screen.findByText(new RegExp(`Task ${top}$`))).toBeTruthy();expect(screen.getAllByRole('row')).toHaveLength(101);expect(screen.queryByText(new RegExp(`Task ${top+100}$`))).toBeNull();}
++ expect(screen.queryByRole('button',{name:'Next 100 work items'})).toBeNull();expect(screen.getByText(/Final batch.*not the whole matching list/)).toBeTruthy();
++ expect(calls.every(x=>x.method==='GET'&&!x.url.pathname.endsWith('/history'))).toBe(true);
++});
++test('filter changes reset continuation and distinguish the complete verified population from all items',async()=>{
++ const {calls}=fixture();render(<RemediationWorkQueue projectID="project123"/>);await screen.findByText(/Task 399$/);
++ fireEvent.click(screen.getByRole('button',{name:'Next 100 work items'}));await screen.findByText(/Task 299$/);
++ fireEvent.change(screen.getByLabelText('Show'),{target:{value:'all'}});await screen.findByText(/Task 499$/);
++ expect(calls.at(-1)!.url.searchParams.get('cursor')).toBeNull();expect(screen.getByText('500',{selector:'strong'})).toBeTruthy();
++ fireEvent.change(screen.getByLabelText('Show'),{target:{value:'verified'}});await screen.findByText(/Task 499$/);
++ await waitFor(()=>expect(screen.queryByRole('button',{name:'Next 100 work items'})).toBeNull());
++ expect(screen.getByText(/complete matching list/)).toBeTruthy();expect(calls.at(-1)!.url.searchParams.get('status')).toBe('verified');
++});
++test('a successful edit refreshes the first server-filtered batch and histories remain lazy',async()=>{
++ const {calls}=fixture(dataset(205),true);render(<RemediationWorkQueue projectID="project123"/>);await screen.findByText(/Task 204$/);
++ fireEvent.click(screen.getByRole('button',{name:'Next 100 work items'}));await screen.findByText(/Task 104$/);
++ const row=screen.getByText(/Task 104$/).closest('tr')!;
++ fireEvent.click(within(row).getByText('Edit work item',{selector:'summary'}));
++ fireEvent.change(within(row).getByLabelText('Status'),{target:{value:'verified'}});
++ fireEvent.change(within(row).getByLabelText('Reviewer note / verification evidence'),{target:{value:'Recorded manual verification evidence.'}});
++ fireEvent.click(within(row).getByRole('button',{name:'Save work item'}));
++ await screen.findByText('Work item saved.');expect(await screen.findByText(/Task 204$/)).toBeTruthy();expect(calls.at(-1)!.url.searchParams.get('cursor')).toBeNull();expect(screen.queryByText(/Task 5$/)).toBeNull();
++ expect(calls.filter(x=>x.url.pathname.endsWith('/history'))).toHaveLength(0);
++ const history=screen.getAllByText('History',{selector:'summary'})[0].closest('details')!;history.open=true;fireEvent(history,new Event('toggle'));
++ expect(await screen.findByText('Preserved original note')).toBeTruthy();expect(calls.filter(x=>x.url.pathname.endsWith('/history'))).toHaveLength(1);
++});
++test('project changes discard old work and continuations even when an old response arrives late',async()=>{
++ const normal=fixture(dataset(1));let release:(value:any)=>void=()=>{};
++ vi.stubGlobal('fetch',vi.fn((url:string,init?:RequestInit)=>url.includes('/old-project/')?new Promise(resolve=>{release=resolve;}):normal.fetcher(url,init)));
++ const view=render(<RemediationWorkQueue projectID="old-project"/>);
++ view.rerender(<RemediationWorkQueue projectID="new-project"/>);await screen.findByText(/Task 0$/);
++ await act(async()=>release({ok:true,json:async()=>({err:false,canEdit:false,items:[{_id:'old',title:'Old project work',status:'todo'}],users:[],sections:[],candidates:[],nextCursor:'old-cursor'})}));
++ await waitFor(()=>expect(screen.queryByText('Old project work')).toBeNull());expect(screen.queryByRole('button',{name:'Next 100 work items'})).toBeNull();
++ expect(normal.calls.at(-1)!.url.searchParams.get('cursor')).toBeNull();
++});
++test('late filter responses cannot overwrite the selected filter or its error state',async()=>{
++ const normal=fixture(dataset(500));let reject:(reason:Error)=>void=()=>{};
++ vi.stubGlobal('fetch',vi.fn((url:string,init?:RequestInit)=>new URL(url,'http://localhost').searchParams.get('status')==='all'?new Promise((_resolve,rejecter)=>{reject=rejecter;}):normal.fetcher(url,init)));
++ render(<RemediationWorkQueue projectID="project123"/>);await screen.findByText(/Task 399$/);
++ fireEvent.change(screen.getByLabelText('Show'),{target:{value:'all'}});
++ fireEvent.change(screen.getByLabelText('Show'),{target:{value:'todo'}});await screen.findByText(/Task 396$/);
++ await act(async()=>reject(Error('Obsolete all-items failure')));await waitFor(()=>expect(screen.queryByRole('alert')).toBeNull());expect(screen.getByLabelText('Show')).toHaveValue('todo');
++});
++test('historical recovery-only view retains its independent legacy page/status read contract',async()=>{
++ const fetcher=vi.fn(async(_url:string)=>({ok:true,json:async()=>({err:false,canEdit:true,items:[],users:[],candidates:[],sections:[{id:'saved-page',title:'Saved pending page',pendingOperationID:'saved-operation'}]})}));vi.stubGlobal('fetch',fetcher);
++ render(<RemediationWorkQueue projectID="project123" recoveryOnly/>);
++ await screen.findByText('Saved pending page');
++ expect(new URL(String(fetcher.mock.calls[0][0]),'http://localhost').searchParams.get('view')).toBeNull();
++ expect(fetcher.mock.calls.every(([url])=>!String(url).includes('/operations/'))).toBe(true);
++});
+diff --git a/client/src/components/projects/RemediationWorkQueue.tsx b/client/src/components/projects/RemediationWorkQueue.tsx
+index e2222198..290b3516 100644
+--- a/client/src/components/projects/RemediationWorkQueue.tsx
++++ b/client/src/components/projects/RemediationWorkQueue.tsx
+@@ -46,27 +46,38 @@ function ItemHistory({base,item,kind,users}:any){
+   </details>;
+ }
+ 
+-export default function RemediationWorkQueue({ projectID, onScanSaved, recoveryOnly = false, capabilities = {}, readRetry = false }: { projectID: string; onScanSaved?: () => void; recoveryOnly?: boolean; capabilities?: any; readRetry?: boolean }) {
++type QueueProps = { projectID: string; onScanSaved?: () => void; recoveryOnly?: boolean; capabilities?: any; readRetry?: boolean };
++export default function RemediationWorkQueue(props: QueueProps) {
++  return <ProjectQueue key={props.projectID} {...props} />;
++}
++function ProjectQueue({ projectID, onScanSaved, recoveryOnly = false, capabilities = {}, readRetry = false }: QueueProps) {
+   const [data, setData] = useState<any>({ items: [], users: [], sections: [], candidates: [] });
+   const [sectionID, setSectionID] = useState('');
+   const [chosen, setChosen] = useState<string[]>([]);
+   const [activePage, setActivePage] = useState<any>(null);
+   const [filter, setFilter] = useState('open');
+   const [busy, setBusy] = useState(false);
++  const [loading, setLoading] = useState(true);
++  const [pageOffset, setPageOffset] = useState(0);
+   const [error, setError] = useState('');
+   const [message, setMessage] = useState('');
+   const generation = useRef(0);
+   const base = `/project/${encodeURIComponent(projectID)}/accessibility/workqueue`;
+   async function load(cursor?:string,sectionCursor?:string,candidateCursor?:string) {
+     const current = ++generation.current;
+-    const next = await request(`${base}?sectionID=${encodeURIComponent(sectionID)}${cursor?'&cursor='+encodeURIComponent(cursor):''}${sectionCursor?'&sectionCursor='+encodeURIComponent(sectionCursor):''}${candidateCursor?'&candidateCursor='+encodeURIComponent(candidateCursor):''}`);
+-    if (current === generation.current) setData(next);
++    const offset = cursor ? pageOffset + data.items.length : 0;
++    setLoading(true); setError('');
++    try {
++      const next = await request(`${base}?${recoveryOnly ? '' : 'view=bounded-v2&status='+encodeURIComponent(filter)+'&'}sectionID=${encodeURIComponent(sectionID)}${cursor?'&cursor='+encodeURIComponent(cursor):''}${sectionCursor?'&sectionCursor='+encodeURIComponent(sectionCursor):''}${candidateCursor?'&candidateCursor='+encodeURIComponent(candidateCursor):''}`);
++      if (current === generation.current) { setData(next); setPageOffset(offset); }
++    } catch (e: any) { if (current === generation.current) setError(e.message); throw e; }
++    finally { if (current === generation.current) setLoading(false); }
+   }
+   useEffect(() => {
+     setChosen([]); setError('');
+-    load().catch(e => setError(e.message));
++    load().catch(() => {});
+     return () => { generation.current++; };
+-  }, [projectID, sectionID]);
++  }, [projectID, sectionID, filter, recoveryOnly]);
+   async function act(fn: () => Promise<any>, success: (r: any) => string) {
+     setBusy(true); setError(''); setMessage('');
+     try { const result = await fn(); await load(); setChosen([]); setMessage(success(result)); }
+@@ -75,43 +86,46 @@ export default function RemediationWorkQueue({ projectID, onScanSaved, recoveryO
+   }
+   const users = new Map(data.users.map((u: any) => [u.uuid, `${u.firstName} ${u.lastName}`]));
+   const existing = new Set([...data.items.map((i: any) => i.key),...data.candidates.filter((c:any)=>c.queued).map((c:any)=>c.key)]);
+-  const items = data.items.filter((i: any) => filter === 'all' || (filter === 'open' ? i.status !== 'verified' : i.status === filter));
++  const items = data.items;
++  const population = data.lists?.items;
+   if (recoveryOnly) return <section className="ui segment remediation-work-queue" aria-label="Pending write recovery">
+     <h2>Pending write recovery</h2>
+     <p>Reviewed writes are unavailable. Saved operation evidence remains read-only; reading it does not unlock a page or repeat a write.</p>
+     {error && <div role="alert" className="ui negative message">{error}</div>}
+-    {data.nextSectionCursor&&<button className="ui button" onClick={()=>load(undefined,data.nextSectionCursor).catch(e=>setError(e.message))}>Next 100 pages</button>}
++    {data.nextSectionCursor&&<button className="ui button" onClick={()=>load(undefined,data.nextSectionCursor).catch(()=>{})}>Next 100 pages</button>}
+     {data.canEdit && data.sections.filter((section: any) => section.pendingOperationID).map((section: any) => <div key={`${section.id}-${section.pendingOperationID}`}>
+       <h3>{section.title}</h3>
+       <RemedyOperationStatus base={base} sectionID={section.id} localOperationID={section.pendingOperationID} request={request} />
+     </div>)}
+   </section>;
+-  return <section className="ui segment remediation-work-queue" aria-label="Remediation work queue">
++  return <section className="ui segment remediation-work-queue" aria-label="Remediation work queue" aria-busy={loading}>
+     <style>{`.remediation-work-queue{margin:1.5rem 0!important}.remediation-work-queue h2{margin-top:0}.remediation-work-queue select,.remediation-work-queue textarea{display:block;padding:.55rem;border:1px solid #999;border-radius:4px;background:white;color:#222;max-width:100%;width:100%}.remediation-work-queue label{display:block;font-weight:600}.remediation-work-queue textarea{margin:.4rem 0}.rq-fields{display:flex;gap:1rem;flex-wrap:wrap;margin:1rem 0}.rq-fields label{flex:1;min-width:160px}.rq-candidates{max-height:260px;overflow:auto;margin:1rem 0;padding:.5rem;border:1px solid #ccc}.rq-candidates label{padding:.5rem;font-weight:normal}.rq-candidates input{margin-right:.6rem}.rq-table{overflow:auto}.rq-table table{min-width:640px}.rq-table td{vertical-align:top}.rq-table summary{cursor:pointer;font-weight:600;margin:.5rem 0}.rq-evidence{white-space:pre-wrap;overflow-wrap:anywhere;max-height:150px;overflow:auto}.rq-history{padding-left:1.3rem}.rq-history li{margin:.6rem 0}.remediation-work-queue :focus-visible{outline:3px solid #1565c0;outline-offset:2px}`}</style>
+     <h2>Remediation work queue</h2>
+     <p>Assign findings and manual checks, record progress, and keep reviewer notes across scans.</p>
+-    <p>On this page: <strong>{data.items.filter((i: any) => i.status !== 'verified').length} open</strong> · {data.items.filter((i: any) => i.status === 'verified').length} verified</p>
++    {loading && <p role="status">Loading work items…</p>}
++    {population && <><p role="status">Matching work items: <strong>{population.total}</strong>. Showing {items.length ? pageOffset + 1 : 0}–{pageOffset + items.length} ({population.returned} in this batch).</p>
++      <p>{population.complete ? 'This response contains the complete matching list.' : population.hasMore ? 'More matching work items are available.' : 'Final batch of this traversal; this response is not the whole matching list.'} Counts reflect the current request, not a status snapshot. Refresh after edits.</p></>}
+     {error && <div role="alert" className="ui negative message">{error}</div>}
+     <div role="status" aria-live="polite">{message}</div>
+     <a className="ui button" href={`/api/v1${base}/items/report`} download>Export work items and history</a>
+-    {data.nextCursor&&<button type="button" className="ui button" disabled={busy} onClick={()=>load(data.nextCursor).catch(e=>setError(e.message))}>Next 100 work items</button>}
++    {data.nextCursor&&<button type="button" className="ui button" disabled={busy || loading} onClick={()=>load(data.nextCursor).catch(()=>{})}>Next 100 work items</button>}
+     {data.canEdit && <><label>Page tools<select value={activePage?.section.id || ''} onChange={e => { const section = data.sections.find((s: any) => s.id === e.target.value); setActivePage(section ? { section } : null); }}><option value="">Choose a page to review</option>{data.sections.map((s: any) => <option key={s.id} value={s.id}>{s.title}</option>)}</select></label></>}
+-    {data.nextSectionCursor&&<button type="button" className="ui button" disabled={busy} onClick={()=>load(undefined,data.nextSectionCursor).catch(e=>setError(e.message))}>Next 100 pages</button>}
++    {data.nextSectionCursor&&<button type="button" className="ui button" disabled={busy || loading} onClick={()=>load(undefined,data.nextSectionCursor).catch(()=>{})}>Next 100 pages</button>}
+     {activePage && data.canEdit && <RemediationPageActions key={`${activePage.section.id}-${activePage.item?._id || ''}`} {...activePage} capabilities={capabilities} readRetry={readRetry} base={base} request={request} refreshed={load} onScanSaved={onScanSaved} close={() => setActivePage(null)} />}
+     {data.canEdit && <details><summary>Add work from a page review</summary>
+-      <label>Page<select value={sectionID} disabled={busy} onChange={e => setSectionID(e.target.value)}><option value="">Choose a page</option>{data.sections.map((s: any) => <option key={s.id} value={s.id}>{s.title}</option>)}</select></label>
++      <label>Page<select value={sectionID} disabled={busy || loading} onChange={e => setSectionID(e.target.value)}><option value="">Choose a page</option>{data.sections.map((s: any) => <option key={s.id} value={s.id}>{s.title}</option>)}</select></label>
+       {sectionID && <><p>Choose findings or manual checks. Existing items are retained; adding again does not duplicate them.</p>
+         <div className="rq-candidates">{data.candidates.map((c: any) => <label key={c.key}><input type="checkbox" disabled={busy || existing.has(c.key)} checked={existing.has(c.key) || chosen.includes(c.key)} onChange={e => setChosen(prev => e.target.checked ? [...prev, c.key] : prev.filter(k => k !== c.key))} />{c.criterionID} · {c.title} {existing.has(c.key) && '(already queued)'}</label>)}{!data.candidates.length && <p>No stored failed or manual criteria. Scan this page first.</p>}</div>
+-        {data.nextCandidateCursor&&<button type="button" className="ui button" disabled={busy||chosen.length>0} onClick={()=>load(undefined,undefined,data.nextCandidateCursor).catch(e=>setError(e.message))}>Next 100 findings</button>}
+-        <button type="button" className="ui primary button" disabled={busy || !chosen.length || chosen.length > 100} onClick={() => act(() => request(base, 'POST', { sectionID, keys: chosen }), r => `${r.created} work item(s) added.`)}>Add selected ({chosen.length})</button></>}
++        {data.nextCandidateCursor&&<button type="button" className="ui button" disabled={busy||loading||chosen.length>0} onClick={()=>load(undefined,undefined,data.nextCandidateCursor).catch(()=>{})}>Next 100 findings</button>}
++        <button type="button" className="ui primary button" disabled={busy || loading || !chosen.length || chosen.length > 100} onClick={() => act(() => request(base, 'POST', { sectionID, keys: chosen }), r => `${r.created} work item(s) added.`)}>Add selected ({chosen.length})</button></>}
+     </details>}
+-    <div className="rq-fields"><label>Show<select value={filter} onChange={e => setFilter(e.target.value)}><option value="open">All open items</option><option value="all">All items</option>{Object.entries(statuses).map(([v, title]) => <option key={v} value={v}>{title}</option>)}</select></label><div><button type="button" className="ui button" disabled={busy} onClick={() => act(() => Promise.resolve(), () => 'Queue refreshed.')}>Refresh queue</button></div></div>
+-    {!items.length ? <p>No work items in this view.</p> : <div className="rq-table"><table className="ui celled table"><thead><tr><th>Page and finding</th><th>Assignment</th><th>Progress and review</th></tr></thead><tbody>{items.map((item: any) => <tr key={item._id}>
++    <div className="rq-fields"><label>Show<select value={filter} disabled={busy} onChange={e => { setData({items:[],users:[],sections:[],candidates:[]}); setPageOffset(0); setActivePage(null); setLoading(true); setFilter(e.target.value); }}><option value="open">All open items</option><option value="all">All items</option>{Object.entries(statuses).map(([v, title]) => <option key={v} value={v}>{title}</option>)}</select></label><div><button type="button" className="ui button" disabled={busy || loading} onClick={() => act(() => Promise.resolve(), () => 'Queue refreshed.')}>Refresh queue</button></div></div>
++    {!items.length ? (!loading && !error ? <p>No work items in this view.</p> : null) : <div className="rq-table"><table className="ui celled table"><thead><tr><th>Page and finding</th><th>Assignment</th><th>Progress and review</th></tr></thead><tbody>{items.map((item: any) => <tr key={item._id}>
+       <td><strong>{item.sectionTitle}</strong>{data.canEdit && <p><button type="button" className="ui button" onClick={() => setActivePage({ section: data.sections.find((section: any) => section.id === item.sectionID) || { id: item.sectionID, title: item.sectionTitle }, item })}>{capabilities.mutate ? 'Fix and rescan task' : 'Review and rescan task'}</button></p>}<p>{item.criterionID} · {item.title}</p>{/^https:\/\//.test(item.sectionURL) && <a href={item.sectionURL} target="_blank" rel="noopener noreferrer">Open source page</a>}<details><summary>Original scan evidence</summary><p>{item.ruleId} {item.selector}</p><pre className="rq-evidence">{item.evidence}</pre><p>Captured: {item.scannedAt ? new Date(item.scannedAt).toLocaleString() : 'Not recorded'}. Evidence may change after a rescan; verification is explicit.</p></details></td>
+       <td>{String(users.get(item.assignee) || (item.assignee ? 'Former team member' : 'Unassigned'))}<p>Priority: {item.priority}</p></td>
+       <td><strong>{label(item.status)}</strong><ItemHistory key={`${item._id}-${item.version}-scans`} base={base} item={item} kind="scanEvidence" users={users}/><ItemHistory key={`${item._id}-${item.version}-history`} base={base} item={item} kind="history" users={users}/>
+ 
+-      {data.canEdit && <details key={`${item._id}-${item.version}`}><summary>Edit work item</summary><EditItem item={item} users={data.users} busy={busy} save={(i: any, fields: any) => act(() => request(`${base}/${i._id}`, 'PATCH', { ...fields, version: i.version }), () => 'Work item saved.')} /></details>}</td>
++      {data.canEdit && <details key={`${item._id}-${item.version}`}><summary>Edit work item</summary><EditItem item={item} users={data.users} busy={busy || loading} save={(i: any, fields: any) => act(() => request(`${base}/${i._id}`, 'PATCH', { ...fields, version: i.version }), () => 'Work item saved.')} /></details>}</td>
+     </tr>)}</tbody></table></div>}
+   </section>;
+ }
+diff --git a/docs/remedy-queue-bounded.md b/docs/remedy-queue-bounded.md
+new file mode 100644
+index 00000000..37674c00
+--- /dev/null
++++ b/docs/remedy-queue-bounded.md
+@@ -0,0 +1,74 @@
++# Bounded work-item discovery
++
++The existing authenticated `GET /project/:projectID/accessibility/workqueue`
++accepts `view=bounded-v2` for its **items** list. The mounted normal work queue
++uses this profile. Remedy remains default-off and tenant/project/session policy
++is unchanged. Historical recovery-only page/status reads retain their existing
++legacy list path, independently of this items profile.
++
++## Request and response
++
++- `limit` defaults to 100; only decimal integers 1–100 are accepted. Invalid values,
++  repeated/structured parameters, unknown views/statuses and malformed cursors
++  return 400. Omit `view` for the unchanged legacy default 100/max 200 contract.
++- `status` defaults to `open`. Values are `all`, `open`, `todo`, `in_progress`,
++  `needs_review`, `verified`, `blocked`. `open` means the four non-verified
++  statuses. The server applies it **before** both count and batch selection.
++- Items remain ordered by `_id DESC`, excluding history and scan-evidence arrays.
++  Existing `items` and `nextCursor` fields remain. `lists.items` adds `total`
++  (the full matching population at this request's upper-ID fence),`returned`,
++  `hasMore`,`complete`, and an explicit `countConsistency` statement.
++- `complete:true` means this one response contains the whole matching list:
++  first request, no later batch, and returned equals total. A final continuation
++  has `hasMore:false` but `complete:false`; it is not the whole list. No accumulated
++  all-history representation is introduced in the browser.
++- `sectionID` still selects the page whose **candidate findings** are shown.
++  It does not filter queue items. Page/candidate/history lists do not gain v2
++  completeness or snapshot semantics in this change.
++
++Use the returned opaque `nextCursor` with the same project/view/status. It binds
++kind/profile/project/filter, the initial largest item ID and the last returned ID.
++Legacy and v2 cursors are not interchangeable. The upper-ID fence excludes newer
++IDs; it is not a transaction, timestamp snapshot or frozen status population.
++Statuses can change between requests; count and batch are separate observed
++queries. Backfilled older IDs and status edits may change membership. Refresh
++starts a new traversal; it is required to see edits in an already-passed range.
++The UI resets continuations on project/filter changes and successful edits and
++keeps only the displayed batch. Old delayed responses cannot populate a new
++project or overwrite a newer filter result.
++
++The complete v2 JSON response is limited to 1 MiB. Oversized evidence/metadata
++returns 413 with a smaller-limit/full-export instruction; records, notes and
++URLs are never silently truncated. The legacy response remains compatible.
++`GET .../items/report` remains a separate authenticated complete streaming export,
++with all retained history/scan evidence, its existing deadline/backpressure/
++cancellation behavior, and terminal `complete:true` only on successful completion.
++A bounded list is not a backup or replacement for that export.
++
++## Indexes and operations
++
++Enabled Remedy storage initializes two additional non-unique indexes:
++`{projectID:1,_id:-1}` and `{projectID:1,status:1,_id:-1}`. Real Mongo 7 execution
++plans on the 500-item/125k-event fixture showed index-only creation-fence counts
++(0 document fetches instead of 500) and100 instead of 500 documents examined for
++the verified batch. Open-batch plans still examined 201 documents; no hint is
++forced and no production/multi-tenant latency claim is made. The indexed fields
++already exist; there is no data backfill or new collection. Disabled Remedy does
++not initialize optional storage. Existing collection/index privileges and useful
++storage-unavailable handling still apply.
++
++Operators must account for index build time/storage and include index definitions
++in reviewed backup/restore/upgrade rehearsal. These are synthetic standalone
++Mongo 7 observations, not validation of an unknown production Atlas tier or host.
++No index build/drop or migration on a live deployment is authorized here. An
++application rollback can retain these non-unique indexes; do not delete journals
++or routine-drop indexes to roll back a client. Earlier clients keep their legacy
++list contract. Preserve the coordinated storage/recovery guides when rolling
++back a full Remedy delivery.
++
++Queue status edits still append their attributed versioned note. They do not fix
++book content, change WCAG criterion reviews or establish conformance. Full
++scan/preview/signed apply/restore/recovery and optional review-only mode remain
++one implementation. LibreTexts integration/deployment owns vendor conditional-
++write validation, write enablement and rollout timing. This list change grants
++no production deployment/write/provider/SSO/release-owner acceptance.
+diff --git a/docs/remedy-storage-and-reads.md b/docs/remedy-storage-and-reads.md
+index 14f34e00..d2a707cb 100644
+--- a/docs/remedy-storage-and-reads.md
++++ b/docs/remedy-storage-and-reads.md
+@@ -149,3 +149,10 @@ writes and preserve all stores; a downgrade compatibility adapter/operational
+ resolution is a separate reviewed action. Never copy events back into Project,
+ delete history or unlock/retry merely to make an older runtime appear healthy.
+ No production migration, deployment or credential provisioning is authorized here.
++
++## Queue item filtering
++
++The mounted queue uses the additive items-only `view=bounded-v2` contract. See
++[bounded work-item discovery](remedy-queue-bounded.md) for strict limits, global
++status filtering, creation-fence/count consistency, indexes and complete export.
++Legacy omitted-view clients and other list/history contracts remain unchanged.
+diff --git a/server/api/remediationqueue.ts b/server/api/remediationqueue.ts
+index 9a7f7d4a..611060ce 100644
+--- a/server/api/remediationqueue.ts
++++ b/server/api/remediationqueue.ts
+@@ -1,3 +1,4 @@
++import { boundedQueueItems, boundedQueueJSON } from '../util/remedyQueueReads.js';
+ import { pageFingerprint } from '../util/conformance.js';
+ import { beginRemedyExport } from '../util/remedyExports.js';
+ import { encodeCursor, paginateValues, pagination, READ_TIMEOUT_MS } from '../util/conformanceReads.js';
+@@ -22,6 +23,9 @@ const schema = new mongoose.Schema({
+   history: [{ actor: String, at: Date, status: String, priority: String, assignee: String, note: String }],
+ }, { timestamps: true, autoCreate: false, autoIndex: false });
+ schema.index({ projectID: 1, key: 1 }, { unique: true });
++// Validated with executionStats: count at the creation fence without fetching journals.
++schema.index({ projectID: 1, _id: -1 });
++schema.index({ projectID: 1, status: 1, _id: -1 });
+ const workItems = () => mongoose.models.RemediationWorkItem || mongoose.model('RemediationWorkItem', schema);
+ let storageReady: Promise<void> | undefined;
+ export async function ensureRemedyStorage() {
+@@ -65,22 +69,25 @@ export function registerRemediationQueue(router: any, { auth, projects, Project,
+   registerRemediationActions(router, { base, access, Project, auth, WorkItems, OperationRecords, bridge });
+   router.get(base, ...access, async (req: any, res: any) => {
+     try {
+-      const {limit,cursor}=pagination(req.query);
++      const bounded = req.query.view !== undefined ? await boundedQueueItems(WorkItems, req.params.projectID, req.query) : null;
++      const {limit,cursor}=bounded ? {limit:100,cursor:null} : pagination(req.query);
+       if(cursor&&(cursor.kind!=='items'||cursor.projectID!==req.params.projectID||!mongoose.isValidObjectId(cursor.after)))throw Object.assign(Error('Invalid item cursor.'),{status:400});
+       const sections = req.queueProject.a11yReview || [];
+       const selected = sections.find((s: any) => String(s._id) === req.query.sectionID);
+       const users = await User.find({ uuid: { $in: projectAssignees(req.queueProject) } }).select('uuid firstName lastName -_id').lean();
+-      const found = await WorkItems.find({projectID:req.params.projectID,...(cursor?{_id:{$lt:new mongoose.Types.ObjectId(cursor.after)}}:{})}).sort({_id:-1}).select('-history -scanEvidence').limit(limit+1).maxTimeMS(READ_TIMEOUT_MS).lean();
++      const found = bounded ? bounded.items : await WorkItems.find({projectID:req.params.projectID,...(cursor?{_id:{$lt:new mongoose.Types.ObjectId(cursor.after)}}:{})}).sort({_id:-1}).select('-history -scanEvidence').limit(limit+1).maxTimeMS(READ_TIMEOUT_MS).lean();
+       const items=found.slice(0,limit);
+       const sectionPage=paginateValues(sections,{limit:req.query.limit,cursor:req.query.sectionCursor},{kind:'queue-pages',projectID:req.params.projectID},s=>JSON.stringify([String(s._id),pageFingerprint(s)]));
+       const candidatePage=paginateValues(selected?queueCandidates(selected):[],{limit:req.query.limit,cursor:req.query.candidateCursor},{kind:'queue-candidates',projectID:req.params.projectID,sectionID:String(selected?._id||'')},c=>c.key);
+       const queued=await WorkItems.find({projectID:req.params.projectID,key:{$in:candidatePage.entries.map(c=>c.key)}}).select('key').limit(200).maxTimeMS(READ_TIMEOUT_MS).lean();
+       const keys=new Set(queued.map((item:any)=>item.key));
+       res.setHeader('Cache-Control','no-store');
+-      res.json({err:false,canEdit:req.queueCanEdit,items,users,sections:sectionPage.entries.map((s:any)=>({id:String(s._id),title:s.sectionTitle,pendingOperationID:s.remedyPendingOperation||''})),
++      const payload={err:false,canEdit:req.queueCanEdit,items,users,sections:sectionPage.entries.map((s:any)=>({id:String(s._id),title:s.sectionTitle,pendingOperationID:s.remedyPendingOperation||''})),
+         candidates:candidatePage.entries.map(c=>({...c,queued:keys.has(c.key)})),nextSectionCursor:sectionPage.nextCursor,nextCandidateCursor:candidatePage.nextCursor,
+-        nextCursor:found.length>limit?encodeCursor({kind:'items',projectID:req.params.projectID,after:String(items.at(-1)._id)}):null});
+-    } catch(error:any) { res.status(error.status||500).json({ err: true, errMsg:error.status===400?error.message:'Unable to load the work queue.' }); }
++        nextCursor:bounded ? bounded.nextCursor : found.length>limit?encodeCursor({kind:'items',projectID:req.params.projectID,after:String(items.at(-1)._id)}):null,
++        ...(bounded ? {view:'bounded-v2',status:req.query.status||'open',lists:bounded.lists} : {})};
++      if(bounded)res.type('application/json').send(boundedQueueJSON(payload));else res.json(payload);
++    } catch(error:any) { res.status(error.status||500).json({ err: true, errMsg:[400,413].includes(error.status)?error.message:'Unable to load the work queue.' }); }
+   });
+   router.get(`${base}/:itemID/history`,...access,async(req:any,res:any)=>{
+     try {
+diff --git a/server/integration/remedy-routes.test.ts b/server/integration/remedy-routes.test.ts
+index 8d34a14f..678693e4 100644
+--- a/server/integration/remedy-routes.test.ts
++++ b/server/integration/remedy-routes.test.ts
+@@ -1195,3 +1195,84 @@ for (const mode of ['silent', 'trickle'] as const) test(`registered health route
+   assert.equal(ready.data.available, true);
+   assert.deepEqual(ready.data.capabilities, { scan: true, preview: true, mutate: true, operation_status: true });
+ });
++
++test('bounded-v2 discovers all four older open batches behind newest verified work',async()=>{
++ const Work=mongoose.connection.db!.collection('remediationworkitems');
++ const ids=Array.from({length:500},()=>new mongoose.Types.ObjectId());
++ await Work.insertMany(ids.map((_id,i)=>({_id,projectID,key:`queue-v2-${i}`,sectionID,title:`Task ${i}`,sectionTitle:'Synthetic page',status:i>=400?'verified':['todo','in_progress','needs_review','blocked'][i%4],version:0,history:Array.from({length:250},(_,n)=>({actor:users.editor,note:`Event ${n}`,at:new Date(n)})),scanEvidence:[]})));
++ const journal=async()=>createHash('sha256').update(JSON.stringify(await Work.find({projectID}).sort({_id:1}).toArray())).digest('hex');
++ const before=await journal();
++ const first=await request(base+'?view=bounded-v2&status=open');
++ assert.equal(first.status,200);assert.ok(first.data.items.every((item:any)=>item.status!=='verified'),'server must filter before choosing100 rows');
++ assert.equal(first.data.lists.items.total,400);assert.equal(first.data.items.length,100);
++ const seen=first.data.items.map((item:any)=>item._id);let cursor=first.data.nextCursor;
++ for(let batch=1;batch<4;batch++){
++  const response=await request(base+'?view=bounded-v2&status=open&cursor='+encodeURIComponent(cursor));assert.equal(response.status,200);
++  assert.equal(response.data.items.length,100);assert.equal(response.data.lists.items.total,400);assert.equal(response.data.lists.items.complete,false);
++  seen.push(...response.data.items.map((item:any)=>item._id));cursor=response.data.nextCursor;
++ }
++ assert.equal(cursor,null);assert.equal(new Set(seen).size,400);
++ const exported=await request(base+'/items/report');assert.equal(exported.status,200);assert.equal(exported.data.items.length,500);assert.equal(exported.data.items.reduce((n:number,x:any)=>n+x.history.length,0),125000);
++ assert.deepEqual(exported.data.items.map((item:any)=>item._id),ids.map(String));assert.equal(await journal(),before);
++ const history=await request(base+'/'+ids[0]+'/history');assert.equal(history.data.records.length,100);assert.ok(history.data.nextCursor);
++ for(const user of ['outsider','unauthenticated'])assert.notEqual((await request(base+'/items/report','GET',undefined,user)).status,200);
++});
++
++test('bounded-v2 validates profiles, filters, limits and project/filter/profile-bound cursors',async()=>{
++ const Work=mongoose.connection.db!.collection('remediationworkitems');
++ await Work.insertMany(Array.from({length:205},(_,i)=>({projectID,key:`validation-${i}`,sectionID,status:'todo',title:`Validation ${i}`,history:[],scanEvidence:[]})));
++ const first=await request(base+'?view=bounded-v2');assert.equal(first.status,200);const cursor=first.data.nextCursor;
++ assert.ok(cursor);const decoded=JSON.parse(Buffer.from(cursor,'base64url').toString());
++ for(const query of ['view=bad','view=','view=bounded-v2&view=bad','view=bounded-v2&status=bad','view=bounded-v2&status=open&status=all','view=bounded-v2&status[x]=open',...['0','101','200','-1','1.5','1e2','%201','', '1&limit=2'].map(limit=>'view=bounded-v2&limit='+limit)]){
++  const response=await request(base+'?'+query);assert.equal(response.status,400,query+JSON.stringify(response.data));
++ }
++ for(const value of ['', 'bad', Buffer.from('null').toString('base64url'),Buffer.from('[]').toString('base64url'),cursor+'=',Buffer.from(JSON.stringify(decoded).replace('"projectID":','"projectID":"foreign","projectID":')).toString('base64url'),...[
++  {...decoded,projectID:'different'}, {...decoded,status:'verified'}, {...decoded,view:'other'}, {...decoded,kind:'items'},
++  {...decoded,upper:'malformed'}, {...decoded,after:'ffffffffffffffffffffffff',upper:'000000000000000000000001'}, {...decoded,extra:true},
++ ].map(value=>Buffer.from(JSON.stringify(value)).toString('base64url'))])assert.equal((await request(base+'?view=bounded-v2&cursor='+encodeURIComponent(value))).status,400,value);
++ assert.equal((await request(base+'?view=bounded-v2&status=verified&cursor='+encodeURIComponent(cursor))).status,400);
++ assert.equal((await request(base+'?cursor='+encodeURIComponent(cursor))).status,400,'v2 cursor cannot silently downgrade to legacy');
++ const legacy=await request(base+'?limit=200');assert.equal(legacy.status,200);assert.equal(legacy.data.items.length,200);assert.equal(legacy.data.lists,undefined);
++ assert.equal((await request(base+'?view=bounded-v2&cursor='+encodeURIComponent(legacy.data.nextCursor))).status,400,'legacy cursor cannot enter v2');
++ assert.equal((await request(base+'?view=bounded-v2','GET',undefined,'outsider')).status,403);
++ assert.equal((await request(base+'?view=bounded-v2','GET',undefined,'unauthenticated')).status,401);
++ const foreignProject='foreign128';await Project.create({projectID:foreignProject,orgID:'libretexts',title:'Other authorized project',members:[users.editor]});
++ try{assert.equal((await request(`/project/${foreignProject}/accessibility/workqueue?view=bounded-v2&cursor=`+encodeURIComponent(cursor))).status,400);}finally{await Project.deleteOne({projectID:foreignProject});}
++});
++
++test('bounded-v2 completeness distinguishes a whole population from the final batch and preserves legacy200',async()=>{
++ const Work=mongoose.connection.db!.collection('remediationworkitems');
++ for(const size of [0,1,100,101,205]){
++  await Work.deleteMany({projectID});if(size)await Work.insertMany(Array.from({length:size},(_,i)=>({projectID,key:`population-${i}`,sectionID,status:'todo',title:`Population ${i}`,history:[],scanEvidence:[]})));
++  let response=await request(base+'?view=bounded-v2&status=all');assert.equal(response.status,200);assert.equal(response.data.lists.items.total,size);assert.equal(response.data.lists.items.returned,Math.min(size,100));assert.equal(response.data.lists.items.complete,size<=100);assert.equal(response.data.lists.items.hasMore,size>100);
++  const seen=response.data.items.map((item:any)=>item._id);
++  while(response.data.nextCursor){response=await request(base+'?view=bounded-v2&status=all&cursor='+encodeURIComponent(response.data.nextCursor));assert.equal(response.status,200);assert.equal(response.data.lists.items.total,size);assert.equal(response.data.lists.items.complete,false);seen.push(...response.data.items.map((item:any)=>item._id));}
++  assert.equal(new Set(seen).size,size);assert.equal(response.data.lists.items.hasMore,false);
++  const legacy=await request(base+'?limit=200');assert.equal(legacy.data.items.length,Math.min(size,200));
++ }
++});
++
++test('bounded-v2 status edits are request-observed, refresh starts a new traversal, and candidate section remains independent',async()=>{
++ const Work=mongoose.connection.db!.collection('remediationworkitems');
++ await Work.insertMany(Array.from({length:205},(_,i)=>({projectID,key:`edit-${i}`,sectionID:i%2?sectionID:'other-section',status:'todo',priority:'normal',assignee:'',version:0,title:`Edit ${i}`,history:[],scanEvidence:[]})));
++ const first=await request(base+'?view=bounded-v2&status=open&sectionID='+sectionID);assert.equal(first.data.lists.items.total,205);assert.equal(first.data.items.length,100);assert.ok(first.data.items.some((x:any)=>x.sectionID==='other-section'),'sectionID selects candidates, not the global item population');
++ assert.ok(first.data.candidates.length>0);
++ const changed=first.data.items[0];const update=await request(base+'/'+changed._id,'PATCH',{version:0,status:'verified',priority:'normal',assignee:'',note:'Explicit synthetic verification evidence.'});assert.equal(update.status,200);
++ const continued=await request(base+'?view=bounded-v2&status=open&cursor='+encodeURIComponent(first.data.nextCursor));assert.equal(continued.data.lists.items.total,204);assert.match(continued.data.lists.items.countConsistency,/not a snapshot/);
++ const newer=await Work.insertOne({projectID,key:'new-after-fence',sectionID,status:'todo',history:[]});
++ const heldFence=await request(base+'?view=bounded-v2&status=open&cursor='+encodeURIComponent(first.data.nextCursor));assert.equal(heldFence.data.lists.items.total,204);assert.ok(heldFence.data.items.every((x:any)=>x._id!==String(newer.insertedId)));
++ const refreshed=await request(base+'?view=bounded-v2&status=open');assert.equal(refreshed.data.lists.items.total,205);assert.equal(refreshed.data.items[0]._id,String(newer.insertedId));
++ const verified=await request(base+'?view=bounded-v2&status=verified');assert.equal(verified.data.lists.items.total,1);assert.equal(verified.data.items[0]._id,changed._id);
++ for(const status of ['all','todo','in_progress','needs_review','blocked']){const filtered=await request(base+'?view=bounded-v2&status='+status);assert.equal(filtered.status,200);assert.equal(filtered.data.lists.items.total,status==='all'?206:status==='todo'?205:0);}
++ const stored=await Work.findOne({_id:new mongoose.Types.ObjectId(changed._id)});assert.equal(stored!.history[0].actor,users.editor);assert.equal(stored!.version,1);
++});
++
++test('bounded-v2 refuses oversized responses without truncating items or authenticated full exports',async()=>{
++ const Work=mongoose.connection.db!.collection('remediationworkitems');const note='Preserve this full evidence '.repeat(50000);
++ const inserted=await Work.insertOne({projectID,key:'large-evidence',sectionID,status:'todo',title:'Large evidence',evidence:note,history:[{actor:users.editor,note}],scanEvidence:[]});
++ const before=await Work.findOne({_id:inserted.insertedId});
++ const bounded=await request(base+'?view=bounded-v2&limit=1');assert.equal(bounded.status,413);assert.match(bounded.data.errMsg,/1 MiB.*complete authenticated/);
++ const legacy=await request(base);assert.equal(legacy.status,200);assert.equal(legacy.data.items[0].evidence,note);
++ const exported=await request(base+'/items/report');assert.equal(exported.status,200);assert.equal(exported.data.complete,true);assert.equal(exported.data.items[0].history[0].note,note);
++ assert.deepEqual(await Work.findOne({_id:inserted.insertedId}),before);
++});
+diff --git a/server/util/remedyQueueReads.ts b/server/util/remedyQueueReads.ts
+new file mode 100644
+index 00000000..986b8120
+--- /dev/null
++++ b/server/util/remedyQueueReads.ts
+@@ -0,0 +1,54 @@
++import mongoose from 'mongoose';
++import { encodeCursor, READ_TIMEOUT_MS } from './conformanceReads.js';
++import { queueStatuses } from './remediationqueue.js';
++
++const profile = 'bounded-v2';
++const openStatuses = queueStatuses.filter(status => status !== 'verified');
++const invalid = (message: string) => Object.assign(Error(message), { status: 400 });
++const id = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{24}$/.test(value);
++const cursorKeys = ['kind', 'view', 'projectID', 'status', 'upper', 'after'].sort();
++
++/** Queue items only. Other lists and the legacy profile retain their contracts. */
++export async function boundedQueueItems(WorkItems: any, projectID: string, query: any) {
++  if (query.view !== profile) throw invalid('Unknown queue view. Use bounded-v2 or omit view for the legacy list.');
++  if (query.limit !== undefined && (typeof query.limit !== 'string' || !/^[1-9]\d{0,2}$/.test(query.limit)))
++    throw invalid('Choose a limit from 1 through 100.');
++  const limit = query.limit === undefined ? 100 : Number(query.limit);
++  if (limit > 100) throw invalid('Choose a limit from 1 through 100.');
++  const status = query.status === undefined ? 'open' : query.status;
++  if (typeof status !== 'string' || !['all', 'open', ...queueStatuses].includes(status))
++    throw invalid('Choose a valid queue status.');
++  let cursor: any = null;
++  if (query.cursor !== undefined) {
++    try {
++      const encoded = query.cursor;
++      if (typeof encoded !== 'string' || encoded.length > 1024 || !/^[A-Za-z0-9_-]+$/.test(encoded)) throw Error();
++      const text = Buffer.from(encoded, 'base64url').toString('utf8');
++      if (Buffer.from(text).toString('base64url') !== encoded) throw Error();
++      cursor = JSON.parse(text);
++      if (encodeCursor(cursor) !== encoded) throw Error();
++      if (!cursor || Array.isArray(cursor) || Object.keys(cursor).sort().join() !== cursorKeys.join() ||
++          cursor.kind !== 'queue-items-v2' || cursor.view !== profile || cursor.projectID !== projectID || cursor.status !== status ||
++          !id(cursor.upper) || !id(cursor.after) || cursor.after > cursor.upper) throw Error();
++    } catch { throw invalid('Invalid queue cursor. Refresh the first batch.'); }
++  }
++  const newest = cursor ? null : await WorkItems.findOne({ projectID }).sort({ _id: -1 }).select('_id').maxTimeMS(READ_TIMEOUT_MS).lean();
++  const upper = cursor?.upper || String(newest?._id || '000000000000000000000000');
++  const matching = { projectID, _id: { $lte: new mongoose.Types.ObjectId(upper) },
++    ...(status === 'all' ? {} : { status: status === 'open' ? { $in: openStatuses } : status }) };
++  const [total, found] = await Promise.all([
++    WorkItems.countDocuments(matching).maxTimeMS(READ_TIMEOUT_MS),
++    WorkItems.find({ ...matching, _id: { ...matching._id, ...(cursor ? { $lt: new mongoose.Types.ObjectId(cursor.after) } : {}) } })
++      .sort({ _id: -1 }).select('-history -scanEvidence').limit(limit + 1).maxTimeMS(READ_TIMEOUT_MS).lean(),
++  ]);
++  const items = found.slice(0, limit), hasMore = found.length > limit;
++  return { items, nextCursor: hasMore ? encodeCursor({ kind: 'queue-items-v2', view: profile, projectID, status, upper, after: String(items.at(-1)._id) }) : null,
++    lists: { items: { total, returned: items.length, complete: !cursor && !hasMore && items.length === total, hasMore,
++      countConsistency: 'Request-observed count and batch; initial upper-ID creation fence. Mutable statuses and separate queries are not a snapshot. Refresh after edits.' } } };
++}
++
++export function boundedQueueJSON(payload: unknown) {
++  const text = JSON.stringify(payload);
++  if (Buffer.byteLength(text) > 1_048_576) throw Object.assign(Error('Work queue response exceeds 1 MiB. Choose a smaller limit or use the complete authenticated work-item export.'), { status: 413 });
++  return text;
++}
+-- 
+2.54.0 (Apple Git-157)
+

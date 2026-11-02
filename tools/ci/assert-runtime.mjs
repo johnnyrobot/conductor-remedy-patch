@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import {createHash} from "node:crypto";
 import assert from "node:assert/strict";
 import {
   MongoClient,
@@ -204,6 +205,31 @@ if (phase === "off") {
     assert.equal((await request(matrix + "/health?projectID=" + config.projectID)).data.available, true);
   }
   observation.boundedHealthAndNormalRecovery = true;
+  // Exercise the new list through the actual compiled router/session/Mongo.
+  assert.equal((await request(base)).status,200);
+  const Work=db.collection("remediationworkitems");
+  const queueIDs=Array.from({length:500},()=>new ObjectId());
+  await Work.insertMany(queueIDs.map((_id,i)=>({_id,projectID:config.projectID,key:`ci-queue-${i}`,sectionID:config.sectionID,sectionTitle:"Synthetic page",title:`Synthetic task ${i}`,status:i>=400?"verified":"todo",priority:"normal",assignee:"",version:0,history:Array.from({length:250},(_,n)=>({actor:config.editor,at:new Date(n),note:`Retained ${i}/${n}`})),scanEvidence:[]})));
+  const journal=async()=>createHash("sha256").update(JSON.stringify(await Work.find({projectID:config.projectID}).sort({_id:1}).toArray())).digest("hex");
+  const queueBefore=await journal();
+  let page=await request(base+"?view=bounded-v2&status=open"),batches=1;
+  assert.equal(page.status,200);assert.equal(page.data.lists.items.total,400);
+  assert.equal(page.data.items.length,100);assert.ok(page.data.items.every(item=>item.status==="todo"));
+  const found=page.data.items.map(item=>item._id),firstCursor=page.data.nextCursor;
+  while(page.data.nextCursor){
+    page=await request(base+"?view=bounded-v2&status=open&cursor="+encodeURIComponent(page.data.nextCursor));
+    assert.equal(page.status,200);assert.equal(page.data.items.length,100);assert.equal(page.data.lists.items.complete,false);found.push(...page.data.items.map(item=>item._id));batches++;
+  }
+  assert.equal(batches,4);assert.equal(new Set(found).size,400);assert.equal(page.data.lists.items.hasMore,false);
+  assert.equal((await request(base+"?limit=200")).data.items.length,200);
+  assert.equal((await request(base+"?view=bounded-v2&limit=101")).status,400);
+  assert.equal((await request(base+"?view=bounded-v2&status=verified&cursor="+encodeURIComponent(firstCursor))).status,400);
+  assert.equal((await request(base+"?view=bounded-v2","GET",undefined,"outsider")).status,403);
+  const verified=await request(base+"?view=bounded-v2&status=verified");assert.equal(verified.data.lists.items.total,100);assert.equal(verified.data.lists.items.complete,true);
+  const allQueue=await request(base+"/items/report");assert.equal(allQueue.status,200);assert.equal(allQueue.data.complete,true);assert.equal(allQueue.data.items.length,500);assert.equal(allQueue.data.items.reduce((count,item)=>count+item.history.length,0),125000);
+  assert.equal(await journal(),queueBefore,"queue reads/export must retain immutable history bytes");
+  observation.boundedQueueV2={olderOpenTotal:400,batches:4,uniqueOpenRows:400,legacy200:true,invalidCursorDenied:true,historyEventsExported:125000,journalUnchanged:true};
+
   assert.equal(
     (await request(matrix + "/scan", "POST", input, "auditor")).status,
     403,

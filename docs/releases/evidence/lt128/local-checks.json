@@ -1,0 +1,26 @@
+{
+  "node": "22.20.0",
+  "mongo": "7.0.14 isolated loopback",
+  "targets": {
+    "staging": {
+      "serverUnit": 80,
+      "clientUnit": 326,
+      "authenticatedRoutes": 101,
+      "serverBuild": true,
+      "clientBuild": true
+    },
+    "release": {
+      "serverUnit": 50,
+      "clientUnit": 233,
+      "authenticatedRoutes": 101,
+      "serverBuild": true,
+      "clientBuild": true
+    }
+  },
+  "standaloneTypecheckPass": false,
+  "inheritedDiagnostics": 60,
+  "browser": "real built staging client, normal local login, real registered router/Mongo, health-only external fixture, self-only CSP",
+  "paidTestSprite": 0,
+  "candidateAndPackageAcceptanceInherited": false,
+  "allFiveFlagsFalse": true
+}

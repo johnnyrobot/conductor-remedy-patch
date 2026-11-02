@@ -1,7 +1,7 @@
 # conductor-remedy-patch
 
 The **Conductor side** of the LibreTexts Remedy accessibility matrix, shipped as
-target-specific thirty-five-patch `git am` series against upstream Conductor, with
+target-specific thirty-six-patch `git am` series against upstream Conductor, with
 the original sixteen-patch delivery retained for history.
 
 This repository contains no Conductor source of its own. It is a delivery
@@ -71,6 +71,20 @@ identify what was actually validated.
 
 ---
 
+[LT-128 bounded queue discovery](docs/releases/lt128-queue-discovery.md) adds
+patch0036. The existing queue items GET supports explicit `view=bounded-v2`:
+100-row maximum, validated global status filtering before count/page selection,
+matching totals, creation-fenced cursors and honest final-batch completeness.
+The mounted queue requests this profile and resets traversal on filter/project/
+edit changes. Omitted-view clients retain max200; independent historical recovery,
+other conformance/history lists and complete authenticated exports are unchanged.
+The full v2 response is at most 1 MiB or an explicit 413, with no silent evidence
+truncation. Apply the series and read `docs/remedy-queue-bounded.md` for exact
+limits, consistency, indexes and backup/rollback considerations. Existing 35-patch
+manifests and Server's 973fa rehearsal inputs remain intact. New component images
+need their own verified receipts and separate assembled-package acceptance.
+All five deployment/write/provider/SSO/release-owner flags remain false.
+
 [LT-190 shared typed capability query](docs/releases/lt190-capability-query.md)
 adds patch0035. The matrix and standalone entry preserve independent historical
 status while validating profiles/capabilities and isolating project changes.
@@ -107,10 +121,10 @@ targets selected by the Chief, not observations of the running production versio
 
 | Target | Manifest | Resulting source tree |
 |---|---|---|
-| Primary staging | [staging manifest](series/staging-67301b35/manifest-lt190.json) | `8d8a10f2b7fad7ff9029d37f301a56e93b22ccec` |
-| Released floor | [release manifest](series/release-2.156.2/manifest-lt190.json) | `babe674d8668969d99fd0bfe48774e2ef9104124` |
+| Primary staging | [staging manifest](series/staging-67301b35/manifest-lt128.json) | `56ae2bbc786b99ea85ce10201e392214622a96dd` |
+| Released floor | [release manifest](series/release-2.156.2/manifest-lt128.json) | `efafc2966ec13a397ebff733473cd0ecf5147235` |
 
-Each active manifest lists its own thirty-five ordered patches and SHA-256 checksums. Use
+Each active manifest lists its own thirty-six ordered patches and SHA-256 checksums. Use
 Node 22 and a fresh **detached** clone; the command refuses a wrong base, dirty
 checkout, active branch, changed patch or escaping path before application.
 
@@ -121,11 +135,11 @@ conductor_checkout=/tmp/conductor-remedy-staging
 git clone https://github.com/LibreTexts/conductor.git "$conductor_checkout"
 git -C "$conductor_checkout" checkout --detach 67301b35c3784ed73ba1a65011ef5a1d689abca1
 node "$conductor_delivery/tools/apply-series.mjs" \
-  "$conductor_delivery/series/staging-67301b35/manifest-lt190.json" "$conductor_checkout"
+  "$conductor_delivery/series/staging-67301b35/manifest-lt128.json" "$conductor_checkout"
 ```
 
 For the released floor, select commit `352a657ec6de7b317a70ad3f8f744bc6d5054d9d`
-and `series/release-2.156.2/manifest-lt190.json` in a separate fresh clone. `--check`
+and `series/release-2.156.2/manifest-lt128.json` in a separate fresh clone. `--check`
 performs the manifest/checkout preflight without applying patches. A successful
 application verifies the final tree; it is not a production deployment approval.
 Applied commit IDs may vary with committer metadata; the expected source tree is
@@ -141,7 +155,7 @@ release still requires the remaining operational/deployment gates. Never deploy 
 accepted historical packaging reference, with [download/verification instructions](docs/releases/lt178-current-candidates.md).
 It selects run40962740223 artifacts **12936278741** (staging, expires
 2026-11-12 at22:10:26UTC) and **12936304442** (release, expires
-2026-11-12 at22:13:20UTC), bound to their original32-patch source trees, not the active35-patch source delivery. Verify expiry and
+2026-11-12 at22:13:20UTC), bound to their original32-patch source trees, not the active 36-patch source delivery. Verify expiry and
 all three distinct ZIP/archive/image identities before packaging; expired or
 unavailable artifacts require a reviewed revalidation and index update.
 That retained index is the LT-178 metadata correction to already-tested images;
@@ -149,7 +163,7 @@ it is not execution evidence for the new source. All original 32-patch bytes rem
 
 [Historical LT-158 Linux candidate validation](docs/releases/lt158-linux-candidate.md) documents
 the automated matrix and candidate artifact contract. Patch0024 pins the actual
-upstream Node22 Docker stages to one immutable base. Those historical compiled Node22 production images passed Linux/amd64 CI with
+upstream Node 22 Docker stages to one immutable base. Those historical compiled Node 22 production images passed Linux/amd64 CI with
 synthetic internal fixtures and archived candidates; full owned-stack Linux and
 production approval remain separate.
 
@@ -304,7 +318,7 @@ bridge, which enforces its own sandbox guard.
 provide an opaque `localReviewID`, authoritative binding and integer expiry.
 Confirmation sends that ID, unchanged token/hash and `confirmed=true`. The server
 checks current permission, user/session, stored target, inputs and expiry, then
-persists issuer/jti intent atomically before dispatching a native Node22 Ed25519
+persists issuer/jti intent atomically before dispatching a native Node 22 Ed25519
 assertion. Browser subject/binding/nonce claims never override stored values.
 A proven changed source/TOC target invalidates old evidence. Matched no-ops preserve
 current evidence without rescanning; actual/unknown writes invalidate it. A status
@@ -383,10 +397,10 @@ question flows. Full release validation still covers the coordinated stack.
 
 | Target | Server unit | Client unit | Authenticated route/Mongo | Builds |
 |---|---:|---:|---:|---|
-| Staging pinned `67301b35` | 80 pass | 299 pass | 94 pass | Client/server pass |
-| Released floor `352a657e` | 50 pass | 206 pass | 94 pass | Client/server pass |
+| Staging pinned `67301b35` | 80 pass | 326 pass | 101 pass | Client/server pass |
+| Released floor `352a657e` | 50 pass | 233 pass | 101 pass | Client/server pass |
 
-The current table records LT-180 component checks; LT-140 historical checks used Node 22.20.0 / npm 10.9.3 with the matching target's
+The current table records LT-128 local component checks; compiled exact-head/main receipts are returned separately. Earlier LT-180/LT-140 checks remain historical; LT-140 historical checks used Node 22.20.0 / npm 10.9.3 with the matching target's
 previously installed, unchanged lockfile dependencies. Both built servers reached
 real `/health` 200 under production mode with synthetic configuration and isolated
 MongoDB **7.0.14**. These were macOS process boots. The earlier compatibility
