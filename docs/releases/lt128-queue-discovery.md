@@ -138,3 +138,15 @@ production deployment/write/provider/SSO/release-owner flags remain false.
 LibreTexts integration/deployment owns vendor conditional-write validation,
 write enablement and rollout timing. No new assembled package acceptance is
 claimed by this component change.
+
+## Review scope and legacy exception
+
+LT-128 is the focused correctness hotfix for confirmed task-discovery failure,
+as authorized by the latest Chief decision (queue GET and mounted filter/paging
+only). The touched legacy loader retains its existing transport/rendering pattern
+under upstream README Client standards' explicit “unless you're only hotfixing”
+exception. This is not an exemption for new general UI work. Migrating all queue
+actions/history into typed API methods and React Query is a separate architecture
+slice; it is unnecessary to restore discovery and would broaden this hotfix.
+The shared LT-190 capability query remains unchanged. Native Standards raised
+this conditional minor; the explicit existing exception is the disposition.

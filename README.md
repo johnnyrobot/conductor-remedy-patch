@@ -124,7 +124,7 @@ targets selected by the Chief, not observations of the running production versio
 | Primary staging | [staging manifest](series/staging-67301b35/manifest-lt128.json) | `56ae2bbc786b99ea85ce10201e392214622a96dd` |
 | Released floor | [release manifest](series/release-2.156.2/manifest-lt128.json) | `efafc2966ec13a397ebff733473cd0ecf5147235` |
 
-Each active manifest lists its own thirty-five ordered patches and SHA-256 checksums. Use
+Each active manifest lists its own thirty-six ordered patches and SHA-256 checksums. Use
 Node 22 and a fresh **detached** clone; the command refuses a wrong base, dirty
 checkout, active branch, changed patch or escaping path before application.
 
@@ -155,7 +155,7 @@ release still requires the remaining operational/deployment gates. Never deploy 
 accepted historical packaging reference, with [download/verification instructions](docs/releases/lt178-current-candidates.md).
 It selects run40962740223 artifacts **12936278741** (staging, expires
 2026-11-12 at22:10:26UTC) and **12936304442** (release, expires
-2026-11-12 at22:13:20UTC), bound to their original32-patch source trees, not the active35-patch source delivery. Verify expiry and
+2026-11-12 at22:13:20UTC), bound to their original32-patch source trees, not the active 36-patch source delivery. Verify expiry and
 all three distinct ZIP/archive/image identities before packaging; expired or
 unavailable artifacts require a reviewed revalidation and index update.
 That retained index is the LT-178 metadata correction to already-tested images;
@@ -397,10 +397,10 @@ question flows. Full release validation still covers the coordinated stack.
 
 | Target | Server unit | Client unit | Authenticated route/Mongo | Builds |
 |---|---:|---:|---:|---|
-| Staging pinned `67301b35` | 80 pass | 299 pass | 94 pass | Client/server pass |
-| Released floor `352a657e` | 50 pass | 206 pass | 94 pass | Client/server pass |
+| Staging pinned `67301b35` | 80 pass | 326 pass | 101 pass | Client/server pass |
+| Released floor `352a657e` | 50 pass | 233 pass | 101 pass | Client/server pass |
 
-The current table records LT-180 component checks; LT-140 historical checks used Node 22.20.0 / npm 10.9.3 with the matching target's
+The current table records LT-128 local component checks; compiled exact-head/main receipts are returned separately. Earlier LT-180/LT-140 checks remain historical; LT-140 historical checks used Node 22.20.0 / npm 10.9.3 with the matching target's
 previously installed, unchanged lockfile dependencies. Both built servers reached
 real `/health` 200 under production mode with synthetic configuration and isolated
 MongoDB **7.0.14**. These were macOS process boots. The earlier compatibility
