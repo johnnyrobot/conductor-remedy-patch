@@ -1,0 +1,730 @@
+From f0622dc4e9fc105ec43377cf4e151a5ebd085ab0 Mon Sep 17 00:00:00 2001
+From: johnnyrobot <174211481+johnnyrobot@users.noreply.github.com>
+Date: Sun, 1 Nov 2026 22:30:02 -0800
+Subject: [PATCH] fix(a11y): share validated project capability queries
+ (LT-190)
+
+Use one typed project query in the matrix and standalone entry. Preserve
+independent historical status and deliberate read retries, fail closed on
+malformed readiness, and require fresh write capability before dispatch.
+
+AI-Model: GPT-6 (Codex)
+---
+ client/src/api.remedy.test.ts                 |  12 +-
+ client/src/api.ts                             |  59 ++++++--
+ ...ectAccessibility.capability-state.test.jsx | 127 ++++++++++++++++++
+ .../ProjectAccessibility.capability.test.jsx  |  79 ++++++-----
+ .../projects/ProjectAccessibility.jsx         |  44 +++---
+ .../projects/useProjectRemedyCapability.ts    |  35 +++++
+ client/src/remediation-queue-entry.test.tsx   | 120 +++++++++++++++--
+ client/src/remediation-queue-entry.tsx        |  17 ++-
+ 8 files changed, 402 insertions(+), 91 deletions(-)
+ create mode 100644 client/src/components/projects/ProjectAccessibility.capability-state.test.jsx
+ create mode 100644 client/src/components/projects/useProjectRemedyCapability.ts
+
+diff --git a/client/src/api.remedy.test.ts b/client/src/api.remedy.test.ts
+index d0733bf5..1befb094 100644
+--- a/client/src/api.remedy.test.ts
++++ b/client/src/api.remedy.test.ts
+@@ -2,7 +2,17 @@ import {test,expect,vi,afterEach} from 'vitest';
+ import api from './api';
+ afterEach(()=>vi.unstubAllGlobals());
+ test('standalone capability request reaches the authenticated API without Platform initialization',async()=>{
+- const fetcher=vi.fn(async()=>({ok:true,json:async()=>({err:false,available:true,capabilities:{scan:true,preview:true,mutate:false,operation_status:false}})}));vi.stubGlobal('fetch',fetcher);
++ const fetcher=vi.fn(async()=>({ok:true,json:async()=>({err:false,available:true,profile:{contract:'cxone-review-v1',name:'review-only',required_capabilities:['scan','preview'],unavailable_reasons:[]},capabilities:{scan:true,preview:true,mutate:false,operation_status:false}})}));vi.stubGlobal('fetch',fetcher);
+  const result=await api.getProjectRemedyCapability('project123');expect(result.data.available).toBe(true);
+  expect(fetcher).toHaveBeenCalledWith('/api/v1/project/accessibility/remedy/health?projectID=project123',expect.objectContaining({credentials:'include',headers:{'X-Requested-With':'XMLHttpRequest'}}));
+ });
++
++test('capability request rejects a malformed profile even when historical status is claimed healthy', async () => {
++ vi.stubGlobal('fetch',vi.fn(async()=>({ok:true,json:async()=>({err:false,available:false,capabilities:{scan:true,preview:false,mutate:false,operation_status:true},profile:{contract:'unknown-profile',name:'review-only',required_capabilities:['scan','preview'],unavailable_reasons:['preview_capacity_unavailable']}})})));
++ await expect(api.getProjectRemedyCapability('project123')).rejects.toThrow('Remedy capability information is unavailable or incompatible.');
++});
++
++test('capability request sanitizes a malformed JSON response', async () => {
++ vi.stubGlobal('fetch',vi.fn(async()=>({ok:true,json:async()=>{throw Error('private upstream body synthetic-secret');}})));
++ await expect(api.getProjectRemedyCapability('project123')).rejects.toThrow('Remedy availability could not be checked.');
++});
+diff --git a/client/src/api.ts b/client/src/api.ts
+index 5f917a87..f9f1f78f 100644
+--- a/client/src/api.ts
++++ b/client/src/api.ts
+@@ -147,20 +147,63 @@ import type { CitationScanData } from "./components/projects/References/model";
+  * have been converted to use this class yet, but we still want global config to apply
+  */
+ 
+-export type ProjectRemedyCapability = ConductorBaseResponse & {
++export type RemedyCapabilities = { scan: boolean; preview: boolean; mutate: boolean; operation_status: boolean };
++export type RemedyProfile = {
++  contract: 'cxone-review-v1';
++  name: 'review-only' | 'full-write';
++  required_capabilities: (keyof RemedyCapabilities)[];
++  unavailable_reasons: string[];
++};
++export type ProjectRemedyCapability = {
++  err: false;
+   available: boolean;
+-  readRetry?: boolean;
+-  capabilities: {scan: boolean; preview: boolean; mutate: boolean; operation_status: boolean};
++  readRetry: boolean;
++  capabilities: RemedyCapabilities;
++  message: string;
++  profile?: RemedyProfile;
+ };
+ 
++function parseProjectRemedyCapability(data: unknown): ProjectRemedyCapability {
++  const invalid = () => Error('Remedy capability information is unavailable or incompatible.');
++  const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
++  const names = ['scan', 'preview', 'mutate', 'operation_status'] as const;
++  if (!record(data) || data.err !== false || typeof data.available !== 'boolean'
++      || (data.readRetry !== undefined && typeof data.readRetry !== 'boolean')) throw invalid();
++  const rawCapabilities = data.capabilities;
++  if (!record(rawCapabilities) || names.some(name => typeof rawCapabilities[name] !== 'boolean')) throw invalid();
++  const capabilities = Object.fromEntries(names.map(name => [name, rawCapabilities[name]])) as RemedyCapabilities;
++  const rawProfile = data.profile;
++  const reviewOnly = record(rawProfile) && rawProfile.name === 'review-only';
++  const required: (keyof RemedyCapabilities)[] = reviewOnly ? ['scan', 'preview'] : [...names];
++  const reasons = ['cxone_configuration_invalid', 'owned_work_unavailable', 'read_dependency_unavailable', 'preview_capacity_unavailable', 'capabilities_unavailable'];
++  let profile: RemedyProfile | undefined;
++  if (rawProfile !== undefined) {
++    if (!record(rawProfile) || rawProfile.contract !== 'cxone-review-v1'
++        || (rawProfile.name !== 'review-only' && rawProfile.name !== 'full-write')
++        || JSON.stringify(rawProfile.required_capabilities) !== JSON.stringify(required)
++        || !Array.isArray(rawProfile.unavailable_reasons) || rawProfile.unavailable_reasons.length > reasons.length
++        || rawProfile.unavailable_reasons.some((reason: unknown) => typeof reason !== 'string' || !reasons.includes(reason))) throw invalid();
++    profile = { contract: 'cxone-review-v1', name: rawProfile.name, required_capabilities: required,
++      unavailable_reasons: [...rawProfile.unavailable_reasons] as string[] };
++  }
++  if ((reviewOnly && capabilities.mutate)
++      || (data.available && required.some(name => !capabilities[name]))
++      || (data.readRetry === true && (data.available || !profile || !reviewOnly
++          || JSON.stringify(profile.unavailable_reasons) !== JSON.stringify(['read_dependency_unavailable'])))) throw invalid();
++  return { err: false, available: data.available, readRetry: data.readRetry === true, capabilities,
++    message: typeof data.message === 'string' && data.message ? data.message : 'Remedy is unavailable for this project.',
++    ...(profile ? { profile } : {}) };
++}
++
+ class API {
+-  async getProjectRemedyCapability(projectID: string) {
++  async getProjectRemedyCapability(projectID: string, signal?: AbortSignal) {
+     const response = await fetch(`${this.BASE_URL}/project/accessibility/remedy/health?projectID=${encodeURIComponent(projectID)}`, {
+-      credentials: 'include', headers: {'X-Requested-With': 'XMLHttpRequest'},
++      credentials: 'include', headers: {'X-Requested-With': 'XMLHttpRequest'}, ...(signal ? { signal } : {}),
+     });
+-    const data: ProjectRemedyCapability = await response.json();
+-    if (!response.ok || data.err) throw Error('Remedy availability could not be checked.');
+-    return {data};
++    if (!response.ok) throw Error('Remedy availability could not be checked.');
++    let data: unknown;
++    try { data = await response.json(); } catch { throw Error('Remedy availability could not be checked.'); }
++    return {data: parseProjectRemedyCapability(data)};
+   }
+ 
+   private readonly BASE_URL: string =
+diff --git a/client/src/components/projects/ProjectAccessibility.capability-state.test.jsx b/client/src/components/projects/ProjectAccessibility.capability-state.test.jsx
+new file mode 100644
+index 00000000..ae4d12fa
+--- /dev/null
++++ b/client/src/components/projects/ProjectAccessibility.capability-state.test.jsx
+@@ -0,0 +1,127 @@
++import React, { act } from 'react';
++import { createRoot } from 'react-dom/client';
++import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
++import { MemoryRouter } from 'react-router-dom';
++import { afterEach, expect, test, vi } from 'vitest';
++import { screen, waitFor, fireEvent } from '@testing-library/react';
++import axios from 'axios';
++import ProjectAccessibility from './ProjectAccessibility';
++vi.mock('axios', () => ({ default: { get: vi.fn(), post: vi.fn(), put: vi.fn() } }));
++vi.mock('react-redux', () => ({ useSelector: () => ({ uuid: 'editor', roles: [] }) }));
++vi.mock('../error/ErrorHooks', () => ({ default: () => ({ handleGlobalError: vi.fn(), clearError: vi.fn() }) }));
++globalThis.IS_REACT_ACT_ENVIRONMENT = true;
++Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
++let root, container, queryClient;
++afterEach(async () => {
++  if (root) await act(async () => root.unmount());
++  container?.remove(); queryClient?.clear(); vi.unstubAllGlobals(); vi.clearAllMocks();
++});
++async function mount(capabilityForProject, initialID = 'capability01') {
++  const capability = id => typeof capabilityForProject === 'function' ? capabilityForProject(id) : capabilityForProject;
++  const healthCalls = [];
++  axios.get.mockImplementation(async (path, options) => {
++    const id = options?.params?.projectID || initialID;
++    if (path.includes('remedy/health')) { healthCalls.push(id); return { data: await capability(id) }; }
++    return { data: path === '/project' ? { err: false, project: { projectID: id, title: id, members: ['editor'], leads: [], liaisons: [], auditors: [], tags: [] } } : { err: false, a11yReview: [{ _id: 'section1', sectionTitle: 'Stored article', sectionURL: 'https://dev.libretexts.org/Sandboxes/johnnyphung/test', pageID: '123', wcagReview: { criteria: [], summary: {} } }] } };
++  });
++  const requests = vi.fn(async (url) => {
++    if (String(url).includes('remedy/health')) {
++      const id = new URL(String(url), 'https://fixture.invalid').searchParams.get('projectID');
++      healthCalls.push(id); return { ok: true, json: async () => await capability(id) };
++    }
++    if (String(url).includes('/operations/')) return { ok: true, json: async () => ({ err: false, pending: true, operation: { outcome: 'known_success' } }) };
++    return { ok: true, json: async () => String(url).endsWith('/conformance')
++      ? { err: false, canEdit: true, report: { scope: null, pages: [], totalCriteria: 0, verifiedCriteria: 0, verificationPercent: 0, status: 'verification_pending', readyForSignoff: false } }
++      : { err: false, canEdit: true, items: [], users: [], candidates: [], sections: [{ id: 'held-page', title: 'Held article', pendingOperationID: 'held-operation' }] } };
++  });
++  vi.stubGlobal('fetch', requests);
++  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
++  container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
++  const render = async id => {
++    await act(async () => root.render(<QueryClientProvider client={queryClient}><MemoryRouter><ProjectAccessibility match={{ params: { id } }} location={{ search: '' }} /></MemoryRouter></QueryClientProvider>));
++    await waitFor(() => expect(healthCalls).toContain(id));
++    await act(async () => new Promise(resolve => setTimeout(resolve, 40)));
++  };
++  await render(initialID);
++  return { requests, healthCalls, render };
++}
++test('mounted matrix refuses an incompatible profile instead of enabling scan or recovery', async () => {
++  const { requests } = await mount({ err: false, available: true,
++    capabilities: { scan: true, preview: true, mutate: true, operation_status: true },
++    profile: { contract: 'unknown-profile', name: 'full-write', required_capabilities: ['scan', 'preview', 'mutate', 'operation_status'], unavailable_reasons: [] } });
++  expect(screen.getByRole('button', { name: 'Scan with Remedy' })).toBeDisabled();
++  expect(screen.queryByRole('button', { name: 'Read operation evidence' })).toBeNull();
++  expect(requests.mock.calls.some(([url]) => String(url).includes('/workqueue'))).toBe(false);
++  expect(axios.post).not.toHaveBeenCalled();
++});
++
++
++const noActions = { scan: false, preview: false, mutate: false, operation_status: false };
++const reviewProfile = reasons => ({ contract: 'cxone-review-v1', name: 'review-only', required_capabilities: ['scan', 'preview'], unavailable_reasons: reasons });
++for (const mode of ['signer', 'preview-capacity']) for (const status of [true, false]) {
++  test(`mounted matrix keeps only independent status for ${mode}, status=${status}`, async () => {
++    const response = { err: false, available: false, capabilities: { scan: true, preview: mode === 'signer', mutate: false, operation_status: status },
++      ...(mode === 'preview-capacity' ? { profile: reviewProfile(['preview_capacity_unavailable']) } : {}) };
++    const { requests, healthCalls } = await mount(response);
++    expect(screen.getByRole('button', { name: 'Scan with Remedy' })).toBeDisabled();
++    expect(screen.queryByLabelText('Page tools')).toBeNull();
++    expect(screen.queryByRole('button', { name: 'Rescan page' })).toBeNull();
++    expect(screen.queryByRole('button', { name: 'Apply to LibreTexts' })).toBeNull();
++    expect(container.querySelector('.conformance-review')).toBeNull();
++    expect(requests.mock.calls.some(([url]) => String(url).includes('/operations/'))).toBe(false);
++    if (status) {
++      const read = await screen.findByRole('button', { name: 'Read operation evidence' });
++      await act(async () => fireEvent.click(read));
++      await screen.findByText(/Write confirmed.*page remains blocked/);
++      expect(requests.mock.calls.filter(([url]) => String(url).includes('/operations/'))).toHaveLength(1);
++    } else {
++      expect(screen.queryByRole('button', { name: 'Read operation evidence' })).toBeNull();
++      expect(requests.mock.calls.some(([url]) => String(url).includes('/workqueue'))).toBe(false);
++    }
++    await act(async () => { window.dispatchEvent(new Event('focus')); window.dispatchEvent(new Event('online')); await new Promise(resolve => setTimeout(resolve, 40)); });
++    expect(healthCalls).toHaveLength(1);
++    expect(requests.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
++    expect(axios.post).not.toHaveBeenCalled();
++  });
++}
++
++for (const malformed of [
++  { err: false, available: 'yes', capabilities: { ...noActions, operation_status: true } },
++  { err: false, available: true, capabilities: { ...noActions, scan: 'true', preview: true } },
++  { err: false, available: false, readRetry: true, profile: reviewProfile(['preview_capacity_unavailable']), capabilities: { ...noActions, operation_status: true } },
++]) test(`mounted matrix fails closed on malformed response ${JSON.stringify(malformed)}`, async () => {
++  const { requests } = await mount(malformed);
++  expect(screen.getByRole('button', { name: 'Scan with Remedy' })).toBeDisabled();
++  expect(screen.queryByRole('button', { name: 'Read operation evidence' })).toBeNull();
++  expect(requests.mock.calls.some(([url]) => String(url).includes('/workqueue'))).toBe(false);
++  expect(axios.post).not.toHaveBeenCalled();
++});
++
++test('mounted matrix ignores a late capability result after switching projects', async () => {
++  let finishOld;
++  const oldResponse = new Promise(resolve => { finishOld = resolve; });
++  const { render, requests, healthCalls } = await mount(id => id === 'old-project' ? oldResponse : { err: false, available: false, capabilities: noActions }, 'old-project');
++  await render('new-project');
++  await act(async () => finishOld({ err: false, available: true, capabilities: { scan: true, preview: true, mutate: true, operation_status: true } }));
++  await act(async () => new Promise(resolve => setTimeout(resolve, 40)));
++  expect(healthCalls).toEqual(['old-project', 'new-project']);
++  expect(screen.getByRole('button', { name: 'Scan with Remedy' })).toBeDisabled();
++  expect(screen.queryByRole('button', { name: 'Read operation evidence' })).toBeNull();
++  expect(requests.mock.calls.some(([url]) => String(url).includes('/workqueue'))).toBe(false);
++  expect(axios.post).not.toHaveBeenCalled();
++});
++
++test('mounted matrix hides cached recovery while the next project health is pending', async () => {
++  let finishNext;
++  const nextResponse = new Promise(resolve => { finishNext = resolve; });
++  const { render, requests } = await mount(id => id === 'cached-project'
++    ? { err: false, available: false, capabilities: { ...noActions, operation_status: true } } : nextResponse, 'cached-project');
++  await screen.findByRole('button', { name: 'Read operation evidence' });
++  await render('pending-project');
++  expect(screen.queryByRole('button', { name: 'Read operation evidence' })).toBeNull();
++  expect(requests.mock.calls.some(([url]) => String(url).includes('/project/pending-project/'))).toBe(false);
++  await act(async () => finishNext({ err: false, available: false, capabilities: noActions }));
++  await act(async () => new Promise(resolve => setTimeout(resolve, 40)));
++  expect(screen.getByRole('button', { name: 'Scan with Remedy' })).toBeDisabled();
++  expect(screen.queryByRole('button', { name: 'Read operation evidence' })).toBeNull();
++});
+diff --git a/client/src/components/projects/ProjectAccessibility.capability.test.jsx b/client/src/components/projects/ProjectAccessibility.capability.test.jsx
+index 45ee260f..3ed4fa51 100644
+--- a/client/src/components/projects/ProjectAccessibility.capability.test.jsx
++++ b/client/src/components/projects/ProjectAccessibility.capability.test.jsx
+@@ -1,7 +1,8 @@
+ import React, { act } from 'react';
+ import { createRoot } from 'react-dom/client';
+ import { MemoryRouter } from 'react-router-dom';
+-import { afterEach, expect, test, vi } from 'vitest';
++import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
++import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+ import axios from 'axios';
+ import { fireEvent, screen, waitFor } from '@testing-library/react';
+ import ProjectAccessibility from './ProjectAccessibility';
+@@ -11,20 +12,26 @@ vi.mock('react-redux', () => ({ useSelector: () => ({ uuid: 'editor', roles: []
+ vi.mock('../error/ErrorHooks', () => ({ default: () => ({ handleGlobalError: vi.fn(), clearError: vi.fn() }) }));
+ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+ Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
++let queryClient;
++beforeEach(() => { queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } }); });
++afterEach(() => { queryClient.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
++function stubRemedyFetch(capability, pageRequests) {
++  vi.stubGlobal('fetch', vi.fn(async (url, options) => String(url).includes('remedy/health')
++    ? { ok: true, json: async () => capability }
++    : pageRequests(url, options)));
++}
+ 
+ test('mounted project page follows server capability and leaves ordinary matrix controls usable', async () => {
+   const section = { _id: 'section-1', sectionTitle: 'Fixture', sectionURL: 'https://dev.libretexts.org/Sandboxes/johnnyphung/test', wcagReview: { criteria: [], summary: {} } };
+   const project = { projectID: 'fixture01', title: 'Fixture project', members: ['editor'], leads: [], liaisons: [], auditors: [], tags: [] };
+-  axios.get.mockImplementation(async path => ({ data: path === '/project' ? { err: false, project }
+-    : path.includes('remedy/health') ? { err: false, available: false, state: 'disabled', message: 'Remedy is not enabled for this project organization.' }
+-    : { err: false, a11yReview: [section] } }));
+-  const external = vi.fn(); vi.stubGlobal('fetch', external);
++  const capability = { err: false, available: false, state: 'disabled', capabilities: { scan: false, preview: false, mutate: false, operation_status: false }, message: 'Remedy is not enabled for this project organization.' };
++  axios.get.mockImplementation(async path => ({ data: path === '/project' ? { err: false, project } : { err: false, a11yReview: [section] } }));
++  const external = vi.fn(); stubRemedyFetch(capability, external);
+   const container = document.createElement('div'); document.body.appendChild(container); const root = createRoot(container);
+   try {
+-    await act(async () => root.render(<MemoryRouter><ProjectAccessibility match={{ params: { id: 'fixture01' } }} location={{ search: '' }} /></MemoryRouter>));
++    await act(async () => root.render(<QueryClientProvider client={queryClient}><MemoryRouter><ProjectAccessibility match={{ params: { id: 'fixture01' } }} location={{ search: '' }} /></MemoryRouter></QueryClientProvider>));
+     await act(async () => {});
+-    expect(container.textContent).toContain('Remedy is not enabled for this project organization.');
++    await screen.findByText('Remedy is not enabled for this project organization.');
+     expect([...container.querySelectorAll('button')].find(b => b.textContent.includes('Scan with Remedy'))).toBeDisabled();
+     const add = screen.getByRole('button', { name: 'Add section' });
+     expect(add).toBeEnabled();
+@@ -35,32 +42,31 @@ test('mounted project page follows server capability and leaves ordinary matrix
+     expect(await screen.findByText('Add Section')).toBeTruthy();
+     expect(container.querySelector('.remediation-work-queue')).toBeNull();
+     expect(external).not.toHaveBeenCalled();
+-    expect(axios.get).toHaveBeenCalledWith('/project/accessibility/remedy/health', { params: { projectID: 'fixture01' } });
++    expect(fetch).toHaveBeenCalledWith('/api/v1/project/accessibility/remedy/health?projectID=fixture01', expect.objectContaining({ credentials: 'include' }));
+   } finally { await act(async () => root.unmount()); container.remove(); }
+ });
+ 
+ 
+-for (const { expired, evidenceChanged } of [{ expired: false, evidenceChanged: false }, { expired: true, evidenceChanged: false }, { expired: false, evidenceChanged: true }]) test(`mounted matrix binds confirmation to stored preview and expiry: expired=${expired} evidenceChanged=${evidenceChanged}`, async () => {
++for (const { expired, evidenceChanged, writeUnavailable = false } of [{ expired: false, evidenceChanged: false }, { expired: true, evidenceChanged: false }, { expired: false, evidenceChanged: true }, { expired: false, evidenceChanged: false, writeUnavailable: true }]) test(`mounted matrix binds confirmation to stored preview and expiry: expired=${expired} evidenceChanged=${evidenceChanged} writeUnavailable=${writeUnavailable}`, async () => {
+   axios.get.mockReset(); axios.post.mockReset(); axios.put.mockReset();
+   let fingerprint = 'source-A';
+   const finding = { id: 'finding1', fixable: true, message: 'Synthetic missing description', ruleId: 'img-alt', selector: 'img' };
+   const review = { criteria: [{ id: '1.1.1', title: 'Non-text Content', principle: 'Perceivable', status: 'fail', evidence: [finding] }], summary: { failCount: 1 } };
+   const section = { _id: 'section-1', pageID: '123', sectionTitle: 'Synthetic page', sectionURL: 'https://dev.libretexts.org/Sandboxes/johnnyphung/test', wcagReview: review };
+   const project = { projectID: 'fixture01', title: 'Fixture project', members: ['editor'], leads: [], liaisons: [], auditors: [], tags: [] };
+-  axios.get.mockImplementation(async path => ({ data: path === '/project' ? { err: false, project }
+-    : path.includes('remedy/health') ? { err: false, available: true, capabilities: { scan: true, preview: true, mutate: true } }
+-    : { err: false, a11yReview: [section] } }));
++  const capability = { err: false, available: true, capabilities: { scan: true, preview: true, mutate: true, operation_status: true } };
++  axios.get.mockImplementation(async path => ({ data: path === '/project' ? { err: false, project } : { err: false, a11yReview: [section] } }));
+   axios.put.mockResolvedValue({ data: { err: false } });
+   axios.post.mockImplementation(async path => { if (path.endsWith('/preview') && evidenceChanged) fingerprint = null; return { data: path.endsWith('/scan') ? { err: false, findings: [finding], wcag_review: review }
+     : path.endsWith('/preview') ? { err: false, before_html: '<p>old</p>', after_html: '<p>new</p>', diff: '-old\n+new', preview_hash: 'hash', preview_token: 'remote-token', evidenceChanged, localReviewID: 'matrix-stored-review', review_expires_at: Math.floor(Date.now()/1000)+(expired ? -1 : 300) }
+     : { err: false, applied: false, outcome: 'not_attempted', reason: 'no_change' } }; });
+   const reviewerPage=()=>({sectionID:'page1',title:'Reviewer page',url:section.sectionURL,fingerprint,blockers:[],criteria:[{id:'1.1.1',title:'Non-text Content',status:'unreviewed',checklist:['Compare source images']}]});
+-  vi.stubGlobal('fetch', vi.fn(async path => ({ ok: true, json: async () => path.includes('/conformance/pages/') ? (path.includes('/criteria/') ? {err:false,criterion:reviewerPage().criteria[0]} : {err:false,page:reviewerPage()}) : path.endsWith('/conformance')
++  stubRemedyFetch(capability, vi.fn(async path => ({ ok: true, json: async () => path.includes('/conformance/pages/') ? (path.includes('/criteria/') ? {err:false,criterion:reviewerPage().criteria[0]} : {err:false,page:reviewerPage()}) : path.endsWith('/conformance')
+     ? { err: false, canEdit: true, report: { scope: { version: 'scope-1' }, pages: [{ sectionID: 'page1', title: 'Reviewer page', url: section.sectionURL, fingerprint, blockers: [], criteria: [{ id: '1.1.1', title: 'Non-text Content', status: 'unreviewed', checklist: ['Compare source images'] }] }], totalCriteria: 1, verifiedCriteria: 0, verificationPercent: 0, status: 'verification_pending', readyForSignoff: false } }
+     : { err: false, canEdit: true, items: [], users: [], sections: [], candidates: [] } })));
+   const container = document.createElement('div'); document.body.appendChild(container); const root = createRoot(container);
+   try {
+-    await act(async () => root.render(<MemoryRouter><ProjectAccessibility match={{ params: { id: 'fixture01' } }} location={{ search: '' }} /></MemoryRouter>));
++    await act(async () => root.render(<QueryClientProvider client={queryClient}><MemoryRouter><ProjectAccessibility match={{ params: { id: 'fixture01' } }} location={{ search: '' }} /></MemoryRouter></QueryClientProvider>));
+     await act(async () => {});
+     if (evidenceChanged) {
+       fireEvent.change(await screen.findByLabelText('Page to evaluate'), { target: { value: 'page1' } });
+@@ -89,11 +95,19 @@ for (const { expired, evidenceChanged } of [{ expired: false, evidenceChanged: f
+     } else {
+       await act(async () => fireEvent.click(confirmation));
+       await waitFor(() => expect(submit).toBeEnabled());
++      const healthBefore = fetch.mock.calls.filter(([path]) => String(path).includes('remedy/health')).length;
++      if (writeUnavailable) { capability.available = false; capability.capabilities.mutate = false; }
+       await act(async () => fireEvent.click(submit));
+-      const write = axios.post.mock.calls.find(([path]) => path.endsWith('/apply'));
+-      expect(write[1]).toMatchObject({ localReviewID: 'matrix-stored-review', confirmed: true, previewToken: 'remote-token' });
+-      expect(write[1]).not.toHaveProperty('reviewer_assertion');
+-      await screen.findByText(/Current evidence was preserved/);
++      if (writeUnavailable) {
++        await waitFor(() => expect(fetch.mock.calls.filter(([path]) => String(path).includes('remedy/health'))).toHaveLength(healthBefore + 1));
++        await waitFor(() => expect(submit).toBeDisabled());
++        expect(axios.post.mock.calls.some(([path]) => path.endsWith('/apply'))).toBe(false);
++      } else {
++        const write = axios.post.mock.calls.find(([path]) => path.endsWith('/apply'));
++        expect(write[1]).toMatchObject({ localReviewID: 'matrix-stored-review', confirmed: true, previewToken: 'remote-token' });
++        expect(write[1]).not.toHaveProperty('reviewer_assertion');
++        await screen.findByText(/Current evidence was preserved/);
++      }
+     }
+   } finally { await act(async () => root.unmount()); container.remove(); }
+ });
+@@ -101,19 +115,18 @@ for (const { expired, evidenceChanged } of [{ expired: false, evidenceChanged: f
+ test('mounted project keeps scoped recovery readable when local signing is unavailable', async () => {
+   axios.get.mockReset(); axios.post.mockReset(); axios.put.mockReset();
+   const project = { projectID: 'fixture01', title: 'Fixture project', members: ['editor'], leads: [], liaisons: [], auditors: [], tags: [] };
+-  axios.get.mockImplementation(async path => ({ data: path === '/project' ? { err: false, project }
+-    : path.includes('remedy/health') ? { err: false, available: false, state: 'degraded', message: 'Reviewed writes are unavailable.', capabilities: { scan: true, preview: true, mutate: false, operation_status: true } }
+-    : { err: false, a11yReview: [] } }));
++  const capability = { err: false, available: false, state: 'degraded', message: 'Reviewed writes are unavailable.', capabilities: { scan: true, preview: true, mutate: false, operation_status: true } };
++  axios.get.mockImplementation(async path => ({ data: path === '/project' ? { err: false, project } : { err: false, a11yReview: [] } }));
+   const fetcher = vi.fn(async path => ({ ok: true, json: async () => path.includes('/operations/')
+     ? { err: false, operation: { outcome: 'known_success' }, pending: true }
+     : { err: false, canEdit: true, users: [], candidates: [], items: [], sections: [
+       { id: 'pending-page', title: 'Pending article', pendingOperationID: 'saved-operation' },
+       { id: 'ordinary-page', title: 'Ordinary article' },
+     ] } }));
+-  vi.stubGlobal('fetch', fetcher);
++  stubRemedyFetch(capability, fetcher);
+   const container = document.createElement('div'); document.body.appendChild(container); const root = createRoot(container);
+   try {
+-    await act(async () => root.render(<MemoryRouter><ProjectAccessibility match={{ params: { id: 'fixture01' } }} location={{ search: '' }} /></MemoryRouter>));
++    await act(async () => root.render(<QueryClientProvider client={queryClient}><MemoryRouter><ProjectAccessibility match={{ params: { id: 'fixture01' } }} location={{ search: '' }} /></MemoryRouter></QueryClientProvider>));
+     const read = await screen.findByRole('button', { name: 'Read operation evidence' });
+     expect(container.textContent).toContain('Pending article');
+     expect(container.textContent).not.toContain('Ordinary article');
+@@ -141,20 +154,19 @@ test("mounted review-only matrix preserves preview and reviewer tools without en
+   const review = { criteria: [{ id: '1.1.1', title: 'Non-text Content', principle: 'Perceivable', status: 'fail', evidence: [finding] }], summary: { failCount: 1 } };
+   const section = { _id: 'section-1', pageID: '123', sectionTitle: 'Synthetic page', sectionURL: 'https://dev.libretexts.org/Sandboxes/johnnyphung/test', wcagReview: review };
+   const project = { projectID: 'fixture01', title: 'Fixture project', members: ['editor'], leads: [], liaisons: [], auditors: [], tags: [] };
+-  axios.get.mockImplementation(async path => ({ data: path === '/project' ? { err: false, project }
+-    : path.includes('remedy/health') ? { err: false, available: true, profile:{contract:"cxone-review-v1",name:"review-only"}, capabilities: { scan: true, preview: true, mutate: false, operation_status:false } }
+-    : { err: false, a11yReview: [section] } }));
++  const capability = { err: false, available: true, profile:{contract:"cxone-review-v1",name:"review-only",required_capabilities:["scan","preview"],unavailable_reasons:[]}, capabilities: { scan: true, preview: true, mutate: false, operation_status:false } };
++  axios.get.mockImplementation(async path => ({ data: path === '/project' ? { err: false, project } : { err: false, a11yReview: [section] } }));
+   axios.put.mockResolvedValue({ data: { err: false } });
+   axios.post.mockImplementation(async path => { if (path.endsWith('/preview') && evidenceChanged) fingerprint = null; return { data: path.endsWith('/scan') ? { err: false, findings: [finding], wcag_review: review }
+     : path.endsWith('/preview') ? { err: false, before_html: '<p>old</p>', after_html: '<p>new</p>', diff: '-old\n+new', preview_hash: 'hash', preview_token: 'remote-token', evidenceChanged, localReviewID: 'matrix-stored-review', review_expires_at: Math.floor(Date.now()/1000)+(expired ? -1 : 300) }
+     : { err: false, applied: false, outcome: 'not_attempted', reason: 'no_change' } }; });
+   const reviewerPage=()=>({sectionID:'page1',title:'Reviewer page',url:section.sectionURL,fingerprint,blockers:[],criteria:[{id:'1.1.1',title:'Non-text Content',status:'unreviewed',checklist:['Compare source images']}]});
+-  vi.stubGlobal('fetch', vi.fn(async path => ({ ok: true, json: async () => path.includes('/conformance/pages/') ? (path.includes('/criteria/') ? {err:false,criterion:reviewerPage().criteria[0]} : {err:false,page:reviewerPage()}) : path.endsWith('/conformance')
++  stubRemedyFetch(capability, vi.fn(async path => ({ ok: true, json: async () => path.includes('/conformance/pages/') ? (path.includes('/criteria/') ? {err:false,criterion:reviewerPage().criteria[0]} : {err:false,page:reviewerPage()}) : path.endsWith('/conformance')
+     ? { err: false, canEdit: true, report: { scope: { version: 'scope-1' }, pages: [{ sectionID: 'page1', title: 'Reviewer page', url: section.sectionURL, fingerprint, blockers: [], criteria: [{ id: '1.1.1', title: 'Non-text Content', status: 'unreviewed', checklist: ['Compare source images'] }] }], totalCriteria: 1, verifiedCriteria: 0, verificationPercent: 0, status: 'verification_pending', readyForSignoff: false } }
+     : { err: false, canEdit: true, items: [], users: [], sections: [], candidates: [] } })));
+   const container = document.createElement('div'); document.body.appendChild(container); const root = createRoot(container);
+   try {
+-    await act(async () => root.render(<MemoryRouter><ProjectAccessibility match={{ params: { id: 'fixture01' } }} location={{ search: '' }} /></MemoryRouter>));
++    await act(async () => root.render(<QueryClientProvider client={queryClient}><MemoryRouter><ProjectAccessibility match={{ params: { id: 'fixture01' } }} location={{ search: '' }} /></MemoryRouter></QueryClientProvider>));
+     await act(async () => {});
+     if (evidenceChanged) {
+       fireEvent.change(await screen.findByLabelText('Page to evaluate'), { target: { value: 'page1' } });
+@@ -184,20 +196,19 @@ test("mounted degraded review-only matrix deliberately retries through its readi
+   const review = { criteria: [{ id: '1.1.1', title: 'Non-text Content', principle: 'Perceivable', status: 'fail', evidence: [finding] }], summary: { failCount: 1 } };
+   const section = { _id: 'section-1', pageID: '123', sectionTitle: 'Synthetic page', sectionURL: 'https://dev.libretexts.org/Sandboxes/johnnyphung/test', wcagReview: review };
+   const project = { projectID: 'fixture01', title: 'Fixture project', members: ['editor'], leads: [], liaisons: [], auditors: [], tags: [] };
+-  axios.get.mockImplementation(async path => ({ data: path === '/project' ? { err: false, project }
+-    : path.includes('remedy/health') ? { err: false, available: false, readRetry: true, profile:{contract:"cxone-review-v1",name:"review-only"}, capabilities: { scan: false, preview: true, mutate: false, operation_status:false } }
+-    : { err: false, a11yReview: [section] } }));
++  const capability = { err: false, available: false, readRetry: true, profile:{contract:"cxone-review-v1",name:"review-only",required_capabilities:["scan","preview"],unavailable_reasons:["read_dependency_unavailable"]}, capabilities: { scan: false, preview: true, mutate: false, operation_status:false } };
++  axios.get.mockImplementation(async path => ({ data: path === '/project' ? { err: false, project } : { err: false, a11yReview: [section] } }));
+   axios.put.mockResolvedValue({ data: { err: false } });
+   axios.post.mockImplementation(async path => { if (path.endsWith('/preview') && evidenceChanged) fingerprint = null; return { data: path.endsWith('/scan') ? { err: false, findings: [finding], wcag_review: review }
+     : path.endsWith('/preview') ? { err: false, before_html: '<p>old</p>', after_html: '<p>new</p>', diff: '-old\n+new', preview_hash: 'hash', preview_token: 'remote-token', evidenceChanged, localReviewID: 'matrix-stored-review', review_expires_at: Math.floor(Date.now()/1000)+(expired ? -1 : 300) }
+     : { err: false, applied: false, outcome: 'not_attempted', reason: 'no_change' } }; });
+   const reviewerPage=()=>({sectionID:'page1',title:'Reviewer page',url:section.sectionURL,fingerprint,blockers:[],criteria:[{id:'1.1.1',title:'Non-text Content',status:'unreviewed',checklist:['Compare source images']}]});
+-  vi.stubGlobal('fetch', vi.fn(async path => ({ ok: true, json: async () => path.includes('/conformance/pages/') ? (path.includes('/criteria/') ? {err:false,criterion:reviewerPage().criteria[0]} : {err:false,page:reviewerPage()}) : path.endsWith('/conformance')
++  stubRemedyFetch(capability, vi.fn(async path => ({ ok: true, json: async () => path.includes('/conformance/pages/') ? (path.includes('/criteria/') ? {err:false,criterion:reviewerPage().criteria[0]} : {err:false,page:reviewerPage()}) : path.endsWith('/conformance')
+     ? { err: false, canEdit: true, report: { scope: { version: 'scope-1' }, pages: [{ sectionID: 'page1', title: 'Reviewer page', url: section.sectionURL, fingerprint, blockers: [], criteria: [{ id: '1.1.1', title: 'Non-text Content', status: 'unreviewed', checklist: ['Compare source images'] }] }], totalCriteria: 1, verifiedCriteria: 0, verificationPercent: 0, status: 'verification_pending', readyForSignoff: false } }
+     : { err: false, canEdit: true, items: [], users: [], sections: [], candidates: [] } })));
+   const container = document.createElement('div'); document.body.appendChild(container); const root = createRoot(container);
+   try {
+-    await act(async () => root.render(<MemoryRouter><ProjectAccessibility match={{ params: { id: 'fixture01' } }} location={{ search: '' }} /></MemoryRouter>));
++    await act(async () => root.render(<QueryClientProvider client={queryClient}><MemoryRouter><ProjectAccessibility match={{ params: { id: 'fixture01' } }} location={{ search: '' }} /></MemoryRouter></QueryClientProvider>));
+     await act(async () => {});
+     if (evidenceChanged) {
+       fireEvent.change(await screen.findByLabelText('Page to evaluate'), { target: { value: 'page1' } });
+diff --git a/client/src/components/projects/ProjectAccessibility.jsx b/client/src/components/projects/ProjectAccessibility.jsx
+index b955ca15..92ae3b98 100644
+--- a/client/src/components/projects/ProjectAccessibility.jsx
++++ b/client/src/components/projects/ProjectAccessibility.jsx
+@@ -20,6 +20,7 @@ import {
+ import { Link } from 'react-router-dom';
+ import React, { useEffect, useRef, useState } from 'react';
+ import useReviewedPreviewExpiry from './useReviewedPreviewExpiry';
++import useProjectRemedyCapability from './useProjectRemedyCapability';
+ import RemedyOperationStatus from './RemedyOperationStatus';
+ import { remedyOutcome } from './remedyOutcome';
+ import { useSelector } from 'react-redux';
+@@ -550,12 +551,13 @@ const ProjectAccessibility = (props) => {
+     const [syncTOCLoading, setSyncTOCLoading] = useState(false);
+ 
+     // Remedy scan + fix session state
+-    const [remedyCapability, setRemedyCapability] = useState({ available: false, message: 'Checking Remedy availability.' });
+-    const [capabilityCheck, setCapabilityCheck] = useState(0);
+-    const remedyAvailable = remedyCapability.projectID === props.match.params.id && remedyCapability.available === true;
+-    const remedyReadAllowed = remedyAvailable || (remedyCapability.projectID === props.match.params.id && remedyCapability.readRetry === true);
+-    const remedyMutationAvailable = remedyAvailable && remedyCapability.capabilities?.mutate === true;
+-    const remedyRecoveryAvailable = remedyCapability.projectID === props.match.params.id && remedyCapability.capabilities?.operation_status === true;
++    const { capability: remedyCapability, refresh: refreshRemedyCapability } = useProjectRemedyCapability(
++        props.match.params.id, canViewDetails,
++    );
++    const remedyAvailable = remedyCapability.available === true;
++    const remedyReadAllowed = remedyAvailable || remedyCapability.readRetry === true;
++    const remedyMutationAvailable = remedyAvailable && remedyCapability.capabilities.mutate === true;
++    const remedyRecoveryAvailable = remedyCapability.capabilities.operation_status === true;
+     const [showScanModal, setShowScanModal] = useState(false);
+     const [scanLoading, setScanLoading] = useState(false);
+     const [scanProgress, setScanProgress] = useState({ total: 0, completed: 0, currentTitle: '' });
+@@ -665,21 +667,6 @@ const ProjectAccessibility = (props) => {
+     }, [project, user, setCanViewDetails, isLocalDemoProject]);
+ 
+ 
+-    useEffect(() => {
+-        let current = true;
+-        setRemedyCapability({ available: false, message: 'Checking Remedy availability.' });
+-        if (canViewDetails) {
+-            axios.get('/project/accessibility/remedy/health', { params: { projectID: props.match.params.id } })
+-                .then(({ data }) => {
+-                    if (current) setRemedyCapability({ ...data, projectID: props.match.params.id,
+-                        available: !data.err && data.available === true,
+-                        message: data.message || data.errMsg || 'Remedy is unavailable for this project.' });
+-                }).catch(() => {
+-                    if (current) setRemedyCapability({ available: false, message: 'Remedy availability could not be checked. Contact your deployment operator.' });
+-                });
+-        }
+-        return () => { current = false; };
+-    }, [canViewDetails, props.match.params.id, capabilityCheck]);
+ 
+     /*
+      * Get Project's restricted details when the permission changes.
+@@ -1163,11 +1150,10 @@ const ProjectAccessibility = (props) => {
+     };
+ 
+     const ensureRemedyServerReady = async (forWrite = false) => {
+-        const res = await axios.get('/project/accessibility/remedy/health', { params: { projectID: props.match.params.id } });
+-        setRemedyCapability({ ...res.data, projectID: props.match.params.id });
+-        if (res.data.err || !(res.data.available || (!forWrite && res.data.readRetry === true))
+-            || (forWrite && res.data.capabilities?.mutate !== true)) {
+-            throw (new Error(res.data.message || res.data.errMsg || 'Remedy Server is not ready.'));
++        const capability = await refreshRemedyCapability();
++        if (!(capability.available || (!forWrite && capability.readRetry))
++            || (forWrite && capability.capabilities.mutate !== true)) {
++            throw (new Error(capability.message || 'Remedy Server is not ready.'));
+         }
+     };
+ 
+@@ -1587,12 +1573,12 @@ const ProjectAccessibility = (props) => {
+                                             </Segment>
+                                             {!remedyAvailable && <div role='status' className='ui message'>
+                                                 <p>{remedyCapability.message}</p>
+-                                                <Button onClick={() => setCapabilityCheck(value => value + 1)}>Check Remedy availability</Button>
++                                                <Button onClick={() => void refreshRemedyCapability().catch(() => {})}>Check Remedy availability</Button>
+                                             </div>}
+                                             {remedyReadAllowed && <>
+                                                 {!remedyMutationAvailable && <p role='status'>Automatic edits are unavailable. Review the scan and proposed changes, edit through the normal book editor, then run a fresh scan. Previews and task checkboxes do not establish a fix or conformance. AI and rendered-browser features require their own configured providers.</p>}
+-                                                <ConformanceReview projectID={props.match.params.id} sections={reviewSections} onScanSaved={() => { getReviewSections({ persistScore: true }); setCapabilityCheck(value => value + 1); }} />
+-                                                <RemediationWorkQueue projectID={props.match.params.id} capabilities={remedyCapability.capabilities} readRetry={remedyCapability.readRetry === true} onScanSaved={() => { getReviewSections({ persistScore: true }); setCapabilityCheck(value => value + 1); }} />
++                                                <ConformanceReview projectID={props.match.params.id} sections={reviewSections} onScanSaved={() => { getReviewSections({ persistScore: true }); void refreshRemedyCapability().catch(() => {}); }} />
++                                                <RemediationWorkQueue projectID={props.match.params.id} capabilities={remedyCapability.capabilities} readRetry={remedyCapability.readRetry === true} onScanSaved={() => { getReviewSections({ persistScore: true }); void refreshRemedyCapability().catch(() => {}); }} />
+                                             </>}
+                                             {!remedyReadAllowed && remedyRecoveryAvailable && <RemediationWorkQueue projectID={props.match.params.id} capabilities={remedyCapability.capabilities} recoveryOnly />}
+                                             <WcagReviewTable
+diff --git a/client/src/components/projects/useProjectRemedyCapability.ts b/client/src/components/projects/useProjectRemedyCapability.ts
+new file mode 100644
+index 00000000..fbabb574
+--- /dev/null
++++ b/client/src/components/projects/useProjectRemedyCapability.ts
+@@ -0,0 +1,35 @@
++import { useEffect, useRef } from 'react';
++import { useQuery } from '@tanstack/react-query';
++import api, { ProjectRemedyCapability } from '../../api';
++
++const unavailable: ProjectRemedyCapability = {
++  err: false, available: false, readRetry: false,
++  capabilities: { scan: false, preview: false, mutate: false, operation_status: false },
++  message: 'Remedy availability could not be checked. Contact your deployment operator.',
++};
++const checking: ProjectRemedyCapability = { ...unavailable, message: 'Checking Remedy availability.' };
++
++/** One project-scoped read model for the matrix and standalone entry. */
++export default function useProjectRemedyCapability(projectID: string, enabled = true) {
++  const current = useRef({ projectID, enabled });
++  current.current = { projectID, enabled };
++  const mounted = useRef(true);
++  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
++  const query = useQuery<ProjectRemedyCapability>({
++    queryKey: ['remedy-capability', projectID],
++    queryFn: async ({ signal }) => (await api.getProjectRemedyCapability(projectID, signal)).data,
++    enabled: enabled && !!projectID,
++    staleTime: 30_000, retry: false, keepPreviousData: false,
++    refetchOnWindowFocus: false, refetchOnReconnect: false,
++  });
++  const capability = !enabled ? checking : query.isError ? unavailable : query.data || checking;
++  async function refresh() {
++    if (!enabled || !projectID) throw Error(unavailable.message);
++    const result = await query.refetch({ throwOnError: true });
++    if (!mounted.current || current.current.projectID !== projectID || !current.current.enabled || !result.data) {
++      throw Error('The project changed. Check Remedy availability for the current project.');
++    }
++    return result.data;
++  }
++  return { capability, refresh };
++}
+diff --git a/client/src/remediation-queue-entry.test.tsx b/client/src/remediation-queue-entry.test.tsx
+index 0da9ee8e..10087aab 100644
+--- a/client/src/remediation-queue-entry.test.tsx
++++ b/client/src/remediation-queue-entry.test.tsx
+@@ -1,11 +1,111 @@
+-import React,{act} from 'react';import{screen,fireEvent,waitFor}from'@testing-library/react';import{test,expect,vi}from'vitest';
+-test('standalone entry keeps healthy historical lookup visible when preview/writer readiness is unavailable',async()=>{
+- window.history.replaceState({},'','/projects/fixture/accessibility');const anchor=document.createElement('section');anchor.className='wcag-summary-segment';document.body.appendChild(anchor);
+- const fetcher=vi.fn(async(url:any,_options?:RequestInit)=>({ok:true,json:async()=>String(url).includes('remedy/health')?{err:false,available:false,capabilities:{scan:true,preview:false,mutate:false,operation_status:true}}:String(url).includes('/operations/')?{err:false,pending:true,operation:{outcome:'known_success'}}:{err:false,canEdit:true,items:[],users:[],candidates:[],sections:[{id:'page1',title:'Held article',pendingOperationID:'saved-operation'}]}}));vi.stubGlobal('fetch',fetcher);
+- try{
+-  await act(async()=>{await import('./remediation-queue-entry');});
+-  const button=await screen.findByRole('button',{name:'Read operation evidence'});expect(screen.queryByLabelText('Page tools')).toBeNull();expect(screen.queryByRole('button',{name:'Rescan page'})).toBeNull();
+-  expect(fetcher.mock.calls.some(([url])=>String(url).includes('/operations/'))).toBe(false);fireEvent.click(button);await screen.findByText(/Write confirmed.*page remains blocked/);
+-  expect(fetcher.mock.calls.every(([,options])=>!options||options.method===undefined||options.method==='GET')).toBe(true);
+- }finally{window.history.replaceState({},'','/');anchor.remove();await waitFor(()=>expect(document.querySelector('.remediation-work-queue')).toBeNull());vi.unstubAllGlobals();}
++import React, { act } from 'react';
++import { screen, fireEvent, waitFor } from '@testing-library/react';
++import { afterEach, beforeAll, test, expect, vi } from 'vitest';
++
++beforeAll(async () => { await import('./remediation-queue-entry'); });
++let anchor: HTMLElement | undefined;
++let host: Element | null;
++let nextProject = 0;
++afterEach(async () => {
++  window.history.replaceState({}, '', '/');
++  anchor?.remove();
++  await waitFor(() => expect(host?.isConnected).toBeFalsy());
++  vi.unstubAllGlobals();
++});
++const noActions = { scan: false, preview: false, mutate: false, operation_status: false };
++const profile = (reasons: string[]) => ({ contract: 'cxone-review-v1', name: 'review-only', required_capabilities: ['scan', 'preview'], unavailable_reasons: reasons });
++async function mount(capability: unknown | ((id: string) => unknown), projectID = `standalone${++nextProject}`) {
++  const healthCalls: string[] = [];
++  const requests = vi.fn(async (url: string, _options?: RequestInit) => {
++    if (String(url).includes('remedy/health')) {
++      const id = new URL(String(url), 'https://fixture.invalid').searchParams.get('projectID')!;
++      healthCalls.push(id);
++      return { ok: true, json: async () => typeof capability === 'function' ? await capability(id) : capability };
++    }
++    return { ok: true, json: async () => String(url).includes('/operations/')
++      ? { err: false, pending: true, operation: { outcome: 'known_success' } }
++      : { err: false, canEdit: true, items: [], users: [], candidates: [], sections: [
++        { id: 'held-page', title: 'Held article', pendingOperationID: 'saved-operation' },
++        { id: 'ordinary-page', title: 'Ordinary article' },
++      ] } };
++  });
++  vi.stubGlobal('fetch', requests);
++  window.history.replaceState({}, '', `/projects/${projectID}/accessibility`);
++  anchor = document.createElement('section'); anchor.className = 'wcag-summary-segment'; document.body.appendChild(anchor);
++  await waitFor(() => expect(healthCalls).toContain(projectID));
++  await act(async () => new Promise(resolve => setTimeout(resolve, 40)));
++  host = anchor.nextElementSibling;
++  async function switchProject(id: string) {
++    window.history.replaceState({}, '', `/projects/${id}/accessibility`);
++    anchor!.textContent = id;
++    await waitFor(() => expect(healthCalls).toContain(id));
++    await act(async () => new Promise(resolve => setTimeout(resolve, 40)));
++    host = anchor!.nextElementSibling;
++  }
++  return { requests, healthCalls, switchProject };
++}
++
++for (const mode of ['signer', 'preview-capacity']) for (const status of [true, false]) {
++  test(`standalone entry keeps only independent recovery for ${mode}, status=${status}`, async () => {
++    const { requests, healthCalls } = await mount({ err: false, available: false,
++      capabilities: { scan: true, preview: mode === 'signer', mutate: false, operation_status: status },
++      ...(mode === 'preview-capacity' ? { profile: profile(['preview_capacity_unavailable']) } : {}) });
++    expect(screen.queryByLabelText('Page tools')).toBeNull();
++    expect(screen.queryByRole('button', { name: 'Rescan page' })).toBeNull();
++    expect(screen.queryByRole('button', { name: 'Apply to LibreTexts' })).toBeNull();
++    expect(screen.queryByText('Ordinary article')).toBeNull();
++    expect(requests.mock.calls.some(([url]) => String(url).includes('/operations/'))).toBe(false);
++    if (status) {
++      const read = await screen.findByRole('button', { name: 'Read operation evidence' });
++      await act(async () => fireEvent.click(read));
++      await screen.findByText(/Write confirmed.*page remains blocked/);
++      expect(requests.mock.calls.filter(([url]) => String(url).includes('/operations/'))).toHaveLength(1);
++    } else {
++      expect(screen.queryByRole('button', { name: 'Read operation evidence' })).toBeNull();
++      expect(requests.mock.calls.some(([url]) => String(url).includes('/workqueue'))).toBe(false);
++    }
++    await act(async () => { window.dispatchEvent(new Event('focus')); window.dispatchEvent(new Event('online')); await new Promise(resolve => setTimeout(resolve, 40)); });
++    expect(healthCalls).toHaveLength(1);
++    expect(requests.mock.calls.every(([, options]) => !options?.method || options.method === 'GET')).toBe(true);
++  });
++}
++
++for (const malformed of [
++  { err: false, available: false, capabilities: { ...noActions, operation_status: true }, profile: { ...profile([]), contract: 'unknown-profile' } },
++  { err: false, available: true, capabilities: { ...noActions, scan: 'true', preview: true, operation_status: true } },
++  { err: false, available: false, readRetry: true, capabilities: { ...noActions, operation_status: true }, profile: profile(['preview_capacity_unavailable']) },
++]) test(`standalone fails closed on malformed capability ${JSON.stringify(malformed)}`, async () => {
++  const { requests, healthCalls } = await mount(malformed);
++  expect(screen.queryByLabelText('Page tools')).toBeNull();
++  expect(screen.queryByRole('button', { name: 'Read operation evidence' })).toBeNull();
++  expect(requests.mock.calls.some(([url]) => String(url).includes('/workqueue'))).toBe(false);
++  await act(async () => new Promise(resolve => setTimeout(resolve, 40)));
++  expect(healthCalls).toHaveLength(1);
++});
++
++test('standalone ignores a late capability response after switching projects', async () => {
++  let finishOld!: (value: unknown) => void;
++  const oldResponse = new Promise(resolve => { finishOld = resolve; });
++  const { requests, healthCalls, switchProject } = await mount((id: string) => id === 'old-standalone' ? oldResponse : { err: false, available: false, capabilities: noActions }, 'old-standalone');
++  await switchProject('new-standalone');
++  await act(async () => finishOld({ err: false, available: true, capabilities: { scan: true, preview: true, mutate: true, operation_status: true } }));
++  await act(async () => new Promise(resolve => setTimeout(resolve, 40)));
++  expect(healthCalls).toEqual(['old-standalone', 'new-standalone']);
++  expect(screen.queryByRole('button', { name: 'Read operation evidence' })).toBeNull();
++  expect(requests.mock.calls.some(([url]) => String(url).includes('/workqueue'))).toBe(false);
++});
++
++test('standalone hides cached recovery while the next project health is pending', async () => {
++  let finishNext!: (value: unknown) => void;
++  const nextResponse = new Promise(resolve => { finishNext = resolve; });
++  const { requests, switchProject } = await mount((id: string) => id === 'cached-standalone'
++    ? { err: false, available: false, capabilities: { ...noActions, operation_status: true } } : nextResponse, 'cached-standalone');
++  await screen.findByRole('button', { name: 'Read operation evidence' });
++  await switchProject('pending-standalone');
++  expect(screen.queryByRole('button', { name: 'Read operation evidence' })).toBeNull();
++  expect(requests.mock.calls.some(([url]) => String(url).includes('/project/pending-standalone/'))).toBe(false);
++  await act(async () => finishNext({ err: false, available: false, capabilities: noActions }));
++  await act(async () => new Promise(resolve => setTimeout(resolve, 40)));
++  expect(screen.queryByLabelText('Page tools')).toBeNull();
++  expect(screen.queryByRole('button', { name: 'Read operation evidence' })).toBeNull();
+ });
+diff --git a/client/src/remediation-queue-entry.tsx b/client/src/remediation-queue-entry.tsx
+index f970127d..53ca7418 100644
+--- a/client/src/remediation-queue-entry.tsx
++++ b/client/src/remediation-queue-entry.tsx
+@@ -2,20 +2,19 @@
+  * the same component directly from ProjectAccessibility. */
+ import React from 'react';
+ import { createRoot, Root } from 'react-dom/client';
+-import {QueryClient, QueryClientProvider, useQuery} from '@tanstack/react-query';
+-import api from './api';
++import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
++import useProjectRemedyCapability from './components/projects/useProjectRemedyCapability';
+ import RemediationWorkQueue from './components/projects/RemediationWorkQueue';
+ 
+ const queryClient = new QueryClient();
+ function ScopedQueue({projectID}: {projectID: string}) {
+-  const {data} = useQuery({queryKey:['remedy-capability', projectID],
+-    queryFn:async()=>(await api.getProjectRemedyCapability(projectID)).data,
+-    staleTime:30_000,retry:false});
+-  const readable = data?.available === true || data?.readRetry === true;
+-  const recoveryOnly = !readable && data?.capabilities?.operation_status === true;
++  const {capability: data} = useProjectRemedyCapability(projectID);
++  const readable = data.available || data.readRetry;
++  const recoveryOnly = !readable && data.capabilities.operation_status;
++  if (!readable && !recoveryOnly) return <p role="status">{data.message}</p>;
+   return <RemediationWorkQueue projectID={projectID} recoveryOnly={recoveryOnly}
+-    capabilities={readable || recoveryOnly ? data?.capabilities : {}}
+-    readRetry={data?.readRetry === true} />;
++    capabilities={data.capabilities}
++    readRetry={data.readRetry} />;
+ }
+ let root: Root | undefined;
+ let host: HTMLDivElement | undefined;
+-- 
+2.54.0 (Apple Git-157)
+
