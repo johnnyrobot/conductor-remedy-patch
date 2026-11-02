@@ -5,12 +5,12 @@
     "staging": {
       "manifest": "staging-67301b35/manifest-lt137.json",
       "baseCommit": "67301b35c3784ed73ba1a65011ef5a1d689abca1",
-      "expectedTree": "0e9ad86efa3d7bd70502157de03f5c22255ab5be"
+      "expectedTree": "cf98fe7e66a9b39db4360e7037be7000ecc9ff5c"
     },
     "release": {
       "manifest": "release-2.156.2/manifest-lt137.json",
       "baseCommit": "352a657ec6de7b317a70ad3f8f744bc6d5054d9d",
-      "expectedTree": "ee5a848ac8687878293318559269d82405292e8e"
+      "expectedTree": "c90a599d39eb9a77fd3e7aea1610b4836aefb0d7"
     }
   },
   "historical": {

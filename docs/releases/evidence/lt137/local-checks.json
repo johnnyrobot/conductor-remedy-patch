@@ -40,5 +40,14 @@
   },
   "testSpriteRuns": 0,
   "deploymentReady": false,
-  "productionWritesEnabled": false
+  "productionWritesEnabled": false,
+  "reviewStyleFix": {
+    "finding": "single-class margin rule loses to Semantic UI .ui.button",
+    "fixedSelector": ".ui.button.access-add-section-btn",
+    "clientBuilds": {
+      "staging": true,
+      "release": true
+    },
+    "newTests": "none; reversible CSS specificity correction verified from installed stylesheet and both builds"
+  }
 }

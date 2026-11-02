@@ -1,8 +1,9 @@
 # LT-137 accessible matrix and bounded availability
 
-The additive patch0033 names the mounted Add section action, gives the hidden
-legacy action a distinct ID, and shares the existing width/margin styling through
-a class. The legacy table remains hidden. Ordinary section editing is available
+Additive patches0033–0034 name the mounted Add section action, give the hidden
+legacy action a distinct ID, and share the existing width/margin styling through
+a class. The final selector retains enough specificity to override Semantic UI's
+button margin. The legacy table remains hidden. Ordinary section editing is available
 when optional Remedy is disabled.
 
 The authenticated project health request now has a five-second hard deadline,
@@ -20,7 +21,7 @@ with the root README's exact upstream base and fresh detached checkout procedure
 CI selects those manifests explicitly. `series/targets.json` selects the active
 source delivery. All original patches0001–0032, `manifest.json` files and the
 accepted32-patch `current-candidates.json` remain byte-identical. That retained
-index still identifies the original LT-197 inputs; it does not describe patch0033.
+index still identifies the original LT-197 inputs; it does not describe the LT-137 changes.
 New compiled candidates need their own execution receipts and must not inherit
 acceptance from those original images.
 
@@ -40,7 +41,7 @@ supported targets. No test deadline or product assertion was relaxed.
 
 Local Node22 checks and their limits are recorded in
 [evidence/lt137/local-checks.json](evidence/lt137/local-checks.json); fresh complete
-33-patch application receipts are beside it. Initial concurrent client runs hit
+33/34-patch application receipts are beside it. Initial concurrent client runs hit
 two unchanged peer-review timing failures on each target; complete reruns pass
 with two workers. Exact-head Linux CI and the PR hold final compiled receipts. An input
 manifest's boot-unverified field describes its pre-execution state, never an

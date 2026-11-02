@@ -4,9 +4,9 @@
   "role": "primary",
   "upstreamRepository": "https://github.com/LibreTexts/conductor.git",
   "baseCommit": "67301b35c3784ed73ba1a65011ef5a1d689abca1",
-  "expectedTree": "0e9ad86efa3d7bd70502157de03f5c22255ab5be",
+  "expectedTree": "cf98fe7e66a9b39db4360e7037be7000ecc9ff5c",
   "upstreamPackageVersion": "2.156.2",
-  "sourceCommit": "5cfd39b69a239928266ddf81b94217ec66da1eb0",
+  "sourceCommit": "b240ca8f16dcb7e2e4cc8afd8b26759b372e09f8",
   "patches": [
     {
       "path": "patches/0001-feat-a11y-carry-CXone-pageID-on-review-sections-extr.patch",
@@ -139,6 +139,10 @@
     {
       "path": "patches/0033-fix-a11y-accessible-section-controls-and-bounded-health.patch",
       "sha256": "524888bfe9837d4a4dd27f548d45b8f1c24809098a02f8c54d0f5e1ebaa80765"
+    },
+    {
+      "path": "patches/0034-fix-a11y-preserve-section-control-margin-specificity.patch",
+      "sha256": "a67ad294a7d9db6796e6c3d5371295162e068d6167fe4ce4467911dbc7a26b70"
     }
   ],
   "upstreamScripts": {

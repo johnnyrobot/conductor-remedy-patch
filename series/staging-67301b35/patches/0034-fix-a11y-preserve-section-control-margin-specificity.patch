@@ -1,0 +1,29 @@
+From b240ca8f16dcb7e2e4cc8afd8b26759b372e09f8 Mon Sep 17 00:00:00 2001
+From: johnnyrobot <174211481+johnnyrobot@users.noreply.github.com>
+Date: Sun, 1 Nov 2026 21:21:02 -0800
+Subject: [PATCH] fix(a11y): preserve section control margin specificity
+ (LT-137)
+
+Keep the shared selector above the installed Semantic UI button rule.
+
+AI-Model: GPT-6 (Codex)
+---
+ client/src/components/projects/Projects.css | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/client/src/components/projects/Projects.css b/client/src/components/projects/Projects.css
+index 8e2ba878..cda6b7e1 100644
+--- a/client/src/components/projects/Projects.css
++++ b/client/src/components/projects/Projects.css
+@@ -108,7 +108,7 @@
+ }
+ 
+ 
+-.access-add-section-btn {
++.ui.button.access-add-section-btn {
+     width: 150px;
+     margin: 0;
+ }
+-- 
+2.54.0 (Apple Git-157)
+
